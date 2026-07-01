@@ -1,0 +1,47 @@
+# ⬅️ คัดลอกเนื้อหานี้ทั้งหมด วางลงใน docker-compose.yml
+version: '3.8'
+services:
+  db-postgres:
+    image: postgres:15-alpine
+    container_name: zexstream_db
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: zexstream_db
+    ports:
+      - "5432:5432"
+
+  ollama:
+    image: ollama/ollama
+    container_name: zexstream_ollama
+    # เราเปิดพอร์ตให้ใช้จากภายนอกได้ด้วย
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_models:/root/.ollama
+
+  zexstream_api:
+    build: ./backend # FastAPI/NestJS จะถูก Build ในโฟลเดอร์ backend
+    container_name: zexstream_api
+    # คำสั่งรันของเราใน NestJS คือ npm run start:dev
+    command: npm run start:dev
+    ports:
+      - "3000:3000"
+    depends_on:
+      db-postgres:
+        condition: service_started
+      ollama:
+        condition: service_started
+    environment:
+      DATABASE_URL: postgres://user:password@db-postgres:5432/zexstream_db?sslmode=disable
+      OLLAMA_HOST: http://ollama:11434 # ใช้ชื่อ container ในการเรียก API
+
+  angular-app:
+    # เราจะใช้ Nginx เป็น Placeholder สำหรับหน้าเว็บ
+    image: nginx:alpine
+    container_name: zexstream_frontend
+    ports:
+      - "4200:80"
+volumes:
+  db_data: {}
+  ollama_models: {}
