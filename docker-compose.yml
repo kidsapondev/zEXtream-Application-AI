@@ -1,4 +1,4 @@
-name: chat-workspace
+name: zextream-application-ai
 
 networks:
   appnet:
