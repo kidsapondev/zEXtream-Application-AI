@@ -98,4 +98,21 @@ describe('ArtifactStreamParser', () => {
       { type: 'artifact-end' },
     ]);
   });
+
+  it('emits independent artifacts for multiple fenced files', () => {
+    const parser = new ArtifactStreamParser();
+    const segments = parser.push(
+      '```ts:first.ts\nexport const first = 1;\n```\ntext\n```py:second.py\nprint(2)\n```\n',
+    );
+
+    expect([...segments, ...parser.flush()]).toEqual([
+      { type: 'artifact-start', language: 'ts', filename: 'first.ts' },
+      { type: 'artifact-chunk', text: 'export const first = 1;\n' },
+      { type: 'artifact-end' },
+      { type: 'prose', text: 'text\n' },
+      { type: 'artifact-start', language: 'py', filename: 'second.py' },
+      { type: 'artifact-chunk', text: 'print(2)\n' },
+      { type: 'artifact-end' },
+    ]);
+  });
 });

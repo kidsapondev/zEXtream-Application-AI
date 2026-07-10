@@ -127,4 +127,64 @@ describe('Application security flows (e2e)', () => {
       .set('Authorization', `Bearer ${attacker.accessToken}`)
       .expect(403);
   });
+
+  it('restores the latest artifact and its revision history through the session API', async () => {
+    const user = await register('artifact-reload');
+    const created = await request(app.getHttpServer())
+      .post('/api/chat/sessions')
+      .set('Authorization', `Bearer ${user.accessToken}`)
+      .send({ defaultProvider: 'ollama', defaultModel: 'test-model' })
+      .expect(201);
+    const session = created.body as { id: string };
+    const message = await prisma.message.create({
+      data: {
+        sessionId: session.id,
+        role: 'assistant',
+        content: 'Created a file.',
+        streamingStatus: 'complete',
+      },
+    });
+    const first = await prisma.codeArtifact.create({
+      data: {
+        sessionId: session.id,
+        messageId: message.id,
+        filename: 'src/example.ts',
+        language: 'typescript',
+        content: 'export const version = 1;',
+        revision: 1,
+        origin: 'ai',
+      },
+    });
+    const latest = await prisma.codeArtifact.create({
+      data: {
+        sessionId: session.id,
+        messageId: message.id,
+        filename: 'src/example.ts',
+        language: 'typescript',
+        content: 'export const version = 2;',
+        revision: 2,
+        parentArtifactId: first.id,
+        origin: 'user',
+      },
+    });
+
+    const artifacts = await request(app.getHttpServer())
+      .get(`/api/chat/sessions/${session.id}/artifacts`)
+      .set('Authorization', `Bearer ${user.accessToken}`)
+      .expect(200);
+    const revisions = await request(app.getHttpServer())
+      .get(
+        `/api/chat/sessions/${session.id}/artifacts/revisions?filename=src%2Fexample.ts`,
+      )
+      .set('Authorization', `Bearer ${user.accessToken}`)
+      .expect(200);
+
+    expect(artifacts.body).toEqual([
+      expect.objectContaining({ id: latest.id, revision: 2, content: latest.content }),
+    ]);
+    expect(revisions.body).toEqual([
+      expect.objectContaining({ id: first.id, revision: 1 }),
+      expect.objectContaining({ id: latest.id, revision: 2, parentArtifactId: first.id }),
+    ]);
+  });
 });

@@ -4,7 +4,10 @@ import {
   ArtifactsService,
   MAX_ARTIFACT_CONTENT_BYTES,
   MAX_ARTIFACT_FILENAME_BYTES,
+  MAX_ARTIFACT_REVISIONS_PER_MESSAGE,
+  MAX_ARTIFACT_REVISIONS_PER_SESSION,
   assertArtifactContent,
+  assertArtifactRevisionQuota,
   normalizeArtifactFilename,
 } from './artifacts.service';
 
@@ -44,6 +47,15 @@ describe('artifact input validation', () => {
       BadRequestException,
     );
   });
+
+  it('enforces artifact revision quotas per message and session', () => {
+    expect(() =>
+      assertArtifactRevisionQuota(MAX_ARTIFACT_REVISIONS_PER_MESSAGE, 0),
+    ).toThrow(BadRequestException);
+    expect(() =>
+      assertArtifactRevisionQuota(0, MAX_ARTIFACT_REVISIONS_PER_SESSION),
+    ).toThrow(BadRequestException);
+  });
 });
 
 describe('ArtifactsService', () => {
@@ -65,9 +77,43 @@ describe('ArtifactsService', () => {
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 
+  it('enforces message revision quota inside the transaction', async () => {
+    const transaction = {
+      codeArtifact: {
+        count: jest.fn(({ where }: { where: { messageId?: string } }) =>
+          Promise.resolve(
+            where.messageId ? MAX_ARTIFACT_REVISIONS_PER_MESSAGE : 0,
+          ),
+        ),
+        findFirst: jest.fn(),
+        create: jest.fn(),
+      },
+    };
+    const prisma = {
+      $transaction: jest.fn((callback: (tx: typeof transaction) => unknown) =>
+        Promise.resolve(callback(transaction)),
+      ),
+    };
+    const service = new ArtifactsService(prisma as never);
+
+    await expect(
+      service.createRevision({
+        sessionId: 'session-1',
+        messageId: 'message-1',
+        filename: 'main.ts',
+        language: 'typescript',
+        content: 'console.log(1);',
+        origin: 'user',
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(transaction.codeArtifact.create).not.toHaveBeenCalled();
+  });
+
   it('persists the normalized relative path', async () => {
     const transaction = {
       codeArtifact: {
+        count: jest.fn().mockResolvedValue(0),
         findFirst: jest.fn().mockResolvedValue(null),
         create: jest.fn().mockResolvedValue({ id: 'artifact-1', revision: 1 }),
       },
@@ -100,6 +146,7 @@ describe('ArtifactsService', () => {
   it('retries after a revision unique conflict and uses the new latest parent', async () => {
     const firstTransaction = {
       codeArtifact: {
+        count: jest.fn().mockResolvedValue(0),
         findFirst: jest.fn().mockResolvedValue(null),
         create: jest.fn().mockRejectedValue(
           new Prisma.PrismaClientKnownRequestError('conflict', {
@@ -111,6 +158,7 @@ describe('ArtifactsService', () => {
     };
     const secondTransaction = {
       codeArtifact: {
+        count: jest.fn().mockResolvedValue(0),
         findFirst: jest
           .fn()
           .mockResolvedValue({ id: 'artifact-1', revision: 1 }),

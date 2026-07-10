@@ -316,10 +316,10 @@
 - [x] ทดสอบ end-to-end ด้วย prompt ที่ทำให้ Ollama ตอบ fenced code จริง
 - [x] ยืนยันว่า code ปรากฏใน Monaco แบบ progressive streaming
 - [x] ยืนยัน artifact row และ revision ถูกบันทึกถูกต้องใน PostgreSQL
-- [ ] ยืนยัน reload session แล้วยังเห็นไฟล์ล่าสุด
+- [x] ยืนยัน reload session แล้วยังเห็นไฟล์ล่าสุด
 - [x] ยืนยัน user edit สร้าง revision และ diff ถูกต้อง
-- [ ] ทดสอบ stop generation กลาง code fence
-- [ ] ทดสอบ malformed/unterminated/multiple code fences
+- [x] ทดสอบ stop generation กลาง code fence
+- [x] ทดสอบ malformed/unterminated/multiple code fences
 
 ### P0/P1 — Defects ที่ต้องแก้
 
@@ -339,7 +339,7 @@
 - [x] แก้ parser ให้ยอมรับ closing fence ที่ EOF โดยไม่มี newline
 - [x] กำหนด behavior เมื่อ stream หยุดกลาง fence: save partial, discard หรือ mark incomplete
 - [x] Sanitize/normalize filename และป้องกัน path traversal หากอนาคตเขียนไฟล์ลง filesystem
-- [~] จำกัดขนาดและจำนวน artifacts ต่อ message/session (จำกัดขนาด revision 1 MiB แล้ว; ยังไม่มี quota ต่อ message/session)
+- [x] จำกัดขนาดและจำนวน artifacts ต่อ message/session
 - [x] ใช้ revision จริงจาก server ใน `artifact:stream:end` แทนสร้าง DTO revision `0` ฝั่ง client
 - [x] Dispose Monaco diff models เมื่อเปลี่ยน model/destroy เพื่อป้องกัน memory leak
 

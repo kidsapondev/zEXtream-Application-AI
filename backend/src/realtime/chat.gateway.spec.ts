@@ -193,4 +193,40 @@ describe('ChatGateway chat:send failure handling', () => {
       `Artifact content must not exceed ${MAX_ARTIFACT_CONTENT_BYTES} bytes`,
     );
   });
+
+  it('persists a partial artifact and finalizes as stopped when generation is aborted', async () => {
+    aiProviderFactory.hasProvider.mockReturnValue(true);
+    aiProviderFactory.getProvider.mockReturnValue({
+      async *streamChat() {
+        yield {
+          type: 'token' as const,
+          delta: '```typescript:src/partial.ts\nexport const partial = true;',
+        };
+        yield { type: 'done' as const, finishReason: 'stopped' as const };
+      },
+    });
+    streamRegistry.register.mockReturnValue(new AbortController());
+    artifactsService.createRevision.mockResolvedValue({
+      id: 'artifact-partial',
+    });
+
+    await gateway.onChatSend(client, {
+      sessionId: 'session-1',
+      content: 'start a file',
+    });
+
+    expect(artifactsService.createRevision).toHaveBeenCalledWith(
+      expect.objectContaining({
+        filename: 'src/partial.ts',
+        content: 'export const partial = true;',
+        origin: 'ai',
+      }),
+    );
+    expect(messagesService.finalizeAssistantMessage).toHaveBeenCalledWith(
+      'assistant-message',
+      '',
+      'stopped',
+      undefined,
+    );
+  });
 });

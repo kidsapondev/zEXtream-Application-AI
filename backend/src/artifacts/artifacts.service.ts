@@ -9,6 +9,10 @@ export const MAX_ARTIFACT_CONTENT_BYTES = 1024 * 1024;
 /** Maximum UTF-8 size of an artifact's normalized relative path. */
 export const MAX_ARTIFACT_FILENAME_BYTES = 255;
 
+/** Limits database growth from a single model response or repeated user edits. */
+export const MAX_ARTIFACT_REVISIONS_PER_MESSAGE = 50;
+export const MAX_ARTIFACT_REVISIONS_PER_SESSION = 1000;
+
 function containsControlCharacter(value: string): boolean {
   for (const character of value) {
     const code = character.charCodeAt(0);
@@ -85,6 +89,22 @@ export function assertArtifactContent(
   assertArtifactContentBytes(Buffer.byteLength(content, 'utf8'));
 }
 
+export function assertArtifactRevisionQuota(
+  messageCount: number,
+  sessionCount: number,
+): void {
+  if (messageCount >= MAX_ARTIFACT_REVISIONS_PER_MESSAGE) {
+    throw new BadRequestException(
+      `A message may contain at most ${MAX_ARTIFACT_REVISIONS_PER_MESSAGE} artifact revisions`,
+    );
+  }
+  if (sessionCount >= MAX_ARTIFACT_REVISIONS_PER_SESSION) {
+    throw new BadRequestException(
+      `A session may contain at most ${MAX_ARTIFACT_REVISIONS_PER_SESSION} artifact revisions`,
+    );
+  }
+}
+
 @Injectable()
 export class ArtifactsService {
   constructor(private readonly prisma: PrismaService) {}
@@ -130,6 +150,12 @@ export class ArtifactsService {
     for (let attempt = 0; attempt < 3; attempt += 1) {
       try {
         return await this.prisma.$transaction(async (tx) => {
+          const [messageCount, sessionCount] = await Promise.all([
+            tx.codeArtifact.count({ where: { messageId: params.messageId } }),
+            tx.codeArtifact.count({ where: { sessionId: params.sessionId } }),
+          ]);
+          assertArtifactRevisionQuota(messageCount, sessionCount);
+
           const latest = await tx.codeArtifact.findFirst({
             where: { sessionId: params.sessionId, filename },
             orderBy: { revision: 'desc' },
