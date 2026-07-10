@@ -1,1 +1,14 @@
-/backend/node_modules
+node_modules/
+dist/
+.angular/
+*.log
+.env
+.env.local
+.DS_Store
+
+# IDE
+.vscode/*
+!.vscode/extensions.json
+
+# Docker volumes bind-mounted for local dev only
+postgres-data/

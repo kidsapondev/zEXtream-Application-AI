@@ -1,0 +1,12 @@
+.app-shell {
+  display: flex;
+  height: 100vh;
+  width: 100%;
+}
+
+.app-shell__main {
+  flex: 1;
+  overflow: hidden;
+  padding: var(--space-6);
+  box-sizing: border-box;
+}

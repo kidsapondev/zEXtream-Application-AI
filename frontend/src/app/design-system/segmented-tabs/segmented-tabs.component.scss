@@ -1,0 +1,25 @@
+.segmented-tabs {
+  display: inline-flex;
+  background: var(--color-canvas);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-sm);
+  padding: 2px;
+  gap: 2px;
+}
+
+.segmented-tabs__item {
+  border: none;
+  background: transparent;
+  font-family: var(--font-body);
+  font-size: 13px;
+  font-weight: 600;
+  padding: var(--space-2) var(--space-4);
+  border-radius: calc(var(--radius-sm) - 2px);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.segmented-tabs__item--active {
+  background: var(--color-ink);
+  color: var(--color-canvas-raised);
+}

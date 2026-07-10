@@ -1,0 +1,14 @@
+services:
+  migrate:
+    build:
+      target: prod
+
+  backend:
+    build:
+      target: prod
+
+  frontend:
+    build:
+      target: prod
+    ports:
+      - '80:80'

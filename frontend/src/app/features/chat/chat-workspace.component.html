@@ -1,0 +1,38 @@
+<ds-app-shell
+  sidebarTitle="Chats"
+  [userInitial]="(authStore.currentUser()?.displayName ?? 'U').charAt(0)"
+  (newChat)="onNewChat()"
+  (settings)="onSettings()"
+>
+  <div sidebar-list>
+    @if (sessionListStore.sessions().length === 0) {
+      <p class="empty-hint">No chats yet — press + to start one.</p>
+    }
+    @for (session of sessionListStore.sessions(); track session.id) {
+      <a class="session-item" [routerLink]="['/chat', session.id]" [class.session-item--active]="session.id === sessionId()">
+        {{ session.title }}
+      </a>
+    }
+  </div>
+
+  <div sidebar-footer>
+    <button type="button" class="link-button" (click)="onLogout()">Sign out</button>
+  </div>
+
+  <div main>
+    @if (sessionId(); as id) {
+      <div class="workspace-split" [class.workspace-split--with-editor]="artifactStore.hasArtifacts()">
+        <div class="workspace-split__chat">
+          <app-chat-thread [sessionId]="id" />
+        </div>
+        @if (artifactStore.hasArtifacts()) {
+          <div class="workspace-split__editor">
+            <app-code-editor-panel />
+          </div>
+        }
+      </div>
+    } @else {
+      <p class="empty-hint">Select a chat, or press + to start a new one.</p>
+    }
+  </div>
+</ds-app-shell>

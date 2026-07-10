@@ -1,0 +1,33 @@
+services:
+  postgres:
+    ports:
+      - '5432:5432'
+
+  migrate:
+    build:
+      target: dev
+    volumes:
+      - ./backend/prisma:/app/backend/prisma
+
+  backend:
+    build:
+      target: dev
+    command: pnpm start:dev
+    ports:
+      - '3000:3000'
+    volumes:
+      - ./backend/src:/app/backend/src
+      - ./backend/prisma:/app/backend/prisma
+    environment:
+      CHOKIDAR_USEPOLLING: 'true'
+
+  frontend:
+    build:
+      target: dev
+    command: pnpm exec ng serve --host 0.0.0.0 --proxy-config proxy.conf.json --poll 2000
+    ports:
+      - '4200:4200'
+    volumes:
+      - ./frontend/src:/app/frontend/src
+    environment:
+      CHOKIDAR_USEPOLLING: 'true'

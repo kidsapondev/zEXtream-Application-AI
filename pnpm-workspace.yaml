@@ -1,0 +1,13 @@
+packages:
+  - 'frontend'
+  - 'backend'
+  - 'packages/*'
+allowBuilds:
+  '@prisma/engines': true
+  argon2: true
+  prisma: true
+  '@parcel/watcher': true
+  esbuild: true
+  lmdb: true
+  msgpackr-extract: true
+  unrs-resolver: true

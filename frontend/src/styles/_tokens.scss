@@ -1,0 +1,40 @@
+:root {
+  --color-ink: #1a1a1a;
+  --color-canvas: #f6f5f1;
+  --color-canvas-raised: #ffffff;
+  --color-hairline: #e0ddd5;
+  --color-text-secondary: #6b6963;
+  --color-text-muted: #9b988f;
+
+  --color-brand-yellow: #f0d94b;
+  --color-status-positive: #c9e265;
+  --color-status-pending: #e8c94a;
+  --color-status-negative: #c6603d;
+
+  --font-heading: 'Inter Tight', 'Inter', system-ui, sans-serif;
+  --font-body: 'Inter', system-ui, sans-serif;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-pill: 999px;
+
+  --sidebar-rail-width: 68px;
+  --sidebar-secondary-width: 280px;
+}
+
+:root[data-theme='dark'] {
+  --color-ink: #f2f1ec;
+  --color-canvas: #1c1b18;
+  --color-canvas-raised: #262420;
+  --color-hairline: #3a3833;
+  --color-text-secondary: #b3b0a6;
+  --color-text-muted: #7d7a70;
+}

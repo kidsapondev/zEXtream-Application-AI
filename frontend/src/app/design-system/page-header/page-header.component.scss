@@ -1,0 +1,19 @@
+.page-header__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-3);
+}
+
+.page-header__title {
+  font-family: var(--font-heading);
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.page-header__rule {
+  height: 2px;
+  background: var(--color-ink);
+  width: 100%;
+}

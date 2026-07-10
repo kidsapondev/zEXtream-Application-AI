@@ -1,0 +1,45 @@
+.icon-rail {
+  width: var(--sidebar-rail-width);
+  height: 100%;
+  background: var(--color-ink);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: var(--space-4) 0;
+  gap: var(--space-4);
+  box-sizing: border-box;
+}
+
+.icon-rail__logo {
+  color: var(--color-canvas-raised);
+  display: flex;
+}
+
+.icon-rail__badge {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-sm);
+  background: var(--color-brand-yellow);
+  color: var(--color-ink);
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.icon-rail__action {
+  width: 32px;
+  height: 32px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-canvas-raised);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.icon-rail__spacer {
+  flex: 1;
+}

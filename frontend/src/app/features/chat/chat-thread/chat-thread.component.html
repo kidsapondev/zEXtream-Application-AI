@@ -1,0 +1,32 @@
+<div class="chat-thread">
+  <div class="chat-thread__messages">
+    @for (message of chatStore.messages(); track message.id) {
+      <div class="message" [class.message--user]="message.role === 'user'">
+        <div class="message__bubble">
+          <p class="message__content">{{ message.content }}</p>
+          @if (message.streamingStatus === 'streaming') {
+            <span class="message__streaming">
+              generating…
+              <button type="button" (click)="stop(message.id)">Stop</button>
+            </span>
+          }
+          @if (message.streamingStatus === 'error') {
+            <span class="message__error">{{ message.errorMessage }}</span>
+          }
+        </div>
+      </div>
+    }
+  </div>
+
+  <form class="chat-thread__composer" (ngSubmit)="send()">
+    <input
+      type="text"
+      [ngModel]="draft()"
+      (ngModelChange)="draft.set($event)"
+      name="draft"
+      placeholder="Ask anything…"
+      autocomplete="off"
+    />
+    <button type="submit">Send</button>
+  </form>
+</div>

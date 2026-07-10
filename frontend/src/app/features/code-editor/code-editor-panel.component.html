@@ -1,0 +1,25 @@
+<div class="code-editor-panel">
+  <div class="code-editor-panel__tabs">
+    @for (filename of artifactStore.openTabs(); track filename) {
+      <button
+        type="button"
+        class="tab"
+        [class.tab--active]="filename === artifactStore.activeFilename()"
+        (click)="artifactStore.selectTab(filename)"
+      >
+        {{ filename }}
+        <span class="tab__close" (click)="$event.stopPropagation(); artifactStore.closeTab(filename)">×</span>
+      </button>
+    }
+  </div>
+
+  <div class="code-editor-panel__editor">
+    @if (artifactStore.activeFile(); as file) {
+      <app-monaco-editor
+        [content]="file.content"
+        [language]="file.language"
+        (contentChange)="onContentChange(file.filename, $event)"
+      />
+    }
+  </div>
+</div>
