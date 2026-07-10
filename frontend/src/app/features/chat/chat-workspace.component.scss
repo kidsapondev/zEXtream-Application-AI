@@ -40,10 +40,23 @@
 .workspace-split--with-editor {
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   max-width: none;
+
+  // Side-by-side chat/editor panes need more room than a tablet-width
+  // viewport can give either one; stack them instead below that width.
+  @media (max-width: 960px) {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(280px, 1fr) minmax(280px, 1fr);
+  }
 }
 
 .workspace-split__chat,
 .workspace-split__editor {
   min-height: 0;
   height: 100%;
+}
+
+@media (max-width: 640px) {
+  .workspace-split {
+    max-width: none;
+  }
 }

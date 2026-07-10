@@ -197,13 +197,13 @@
 
 ### ต้องทำต่อ
 
-- [ ] เพิ่ม route `/settings/providers` หรือซ่อนปุ่ม settings จนกว่า Phase 6 จะพร้อม
+- [x] เพิ่ม route `/settings/providers` หรือซ่อนปุ่ม settings จนกว่า Phase 6 จะพร้อม
 - [ ] เพิ่ม rename/archive/delete session controls ใน UI
 - [ ] เพิ่ม confirmation ก่อนลบ session
 - [ ] เพิ่ม loading, empty และ error states ที่สม่ำเสมอ
 - [ ] เพิ่ม toast/notification service
 - [ ] เพิ่ม accessibility: labels, focus management, keyboard navigation และ ARIA states
-- [ ] เพิ่ม mobile layout และตรวจ split-pane บนหน้าจอเล็ก
+- [x] เพิ่ม mobile layout และตรวจ split-pane บนหน้าจอเล็ก
 - [ ] เพิ่ม frontend component/store tests
 
 เกณฑ์รับงาน:

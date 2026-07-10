@@ -4,6 +4,24 @@ import { Component, input, output } from '@angular/core';
   selector: 'ds-icon-rail',
   template: `
     <nav class="icon-rail">
+      <button
+        type="button"
+        class="icon-rail__menu-toggle"
+        (click)="menuToggle.emit()"
+        [attr.aria-label]="menuOpen() ? 'Close menu' : 'Open menu'"
+        [attr.aria-expanded]="menuOpen()"
+      >
+        @if (menuOpen()) {
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+            <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+          </svg>
+        } @else {
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+            <path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+          </svg>
+        }
+      </button>
+
       <div class="icon-rail__logo" aria-hidden="true">
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
           <path d="M12 2 L22 12 L12 22 L2 12 Z" stroke="currentColor" stroke-width="1.5" />
@@ -36,6 +54,8 @@ import { Component, input, output } from '@angular/core';
 })
 export class IconRailComponent {
   readonly userInitial = input('U');
+  readonly menuOpen = input(false);
   readonly newChat = output<void>();
   readonly settings = output<void>();
+  readonly menuToggle = output<void>();
 }

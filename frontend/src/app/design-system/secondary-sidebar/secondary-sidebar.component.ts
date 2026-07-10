@@ -3,7 +3,7 @@ import { Component, input } from '@angular/core';
 @Component({
   selector: 'ds-secondary-sidebar',
   template: `
-    <aside class="secondary-sidebar">
+    <aside class="secondary-sidebar" [class.secondary-sidebar--open]="open()">
       <div class="secondary-sidebar__header">
         <h2 class="secondary-sidebar__title">{{ title() }}</h2>
         <ng-content select="[header-extra]" />
@@ -22,4 +22,5 @@ import { Component, input } from '@angular/core';
 })
 export class SecondarySidebarComponent {
   readonly title = input.required<string>();
+  readonly open = input(false);
 }

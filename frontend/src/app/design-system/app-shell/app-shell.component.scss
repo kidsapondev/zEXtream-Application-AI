@@ -2,11 +2,40 @@
   display: flex;
   height: 100vh;
   width: 100%;
+  position: relative;
 }
 
 .app-shell__main {
   flex: 1;
+  min-width: 0;
   overflow: hidden;
   padding: var(--space-6);
   box-sizing: border-box;
+
+  @media (max-width: 860px) {
+    padding: var(--space-4);
+  }
+}
+
+.app-shell__backdrop {
+  display: none;
+
+  @media (max-width: 860px) {
+    display: block;
+    position: fixed;
+    inset: 0;
+    left: var(--sidebar-rail-width);
+    background: rgba(0, 0, 0, 0.35);
+    z-index: 35;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease;
+  }
+}
+
+.app-shell__backdrop--visible {
+  @media (max-width: 860px) {
+    opacity: 1;
+    pointer-events: auto;
+  }
 }

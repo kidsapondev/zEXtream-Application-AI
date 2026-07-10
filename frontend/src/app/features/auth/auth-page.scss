@@ -4,10 +4,13 @@
   align-items: center;
   justify-content: center;
   background: var(--color-canvas);
+  padding: var(--space-4);
+  box-sizing: border-box;
 }
 
 .auth-card {
   width: 380px;
+  max-width: 100%;
 }
 
 .auth-card__title {

@@ -1,3 +1,7 @@
+:host {
+  display: contents;
+}
+
 .icon-rail {
   width: var(--sidebar-rail-width);
   height: 100%;
@@ -8,6 +12,23 @@
   padding: var(--space-4) 0;
   gap: var(--space-4);
   box-sizing: border-box;
+  flex-shrink: 0;
+}
+
+.icon-rail__menu-toggle {
+  display: none;
+  width: 32px;
+  height: 32px;
+  border: none;
+  background: transparent;
+  color: var(--color-canvas-raised);
+  cursor: pointer;
+  align-items: center;
+  justify-content: center;
+
+  @media (max-width: 860px) {
+    display: flex;
+  }
 }
 
 .icon-rail__logo {
