@@ -19,6 +19,7 @@
         [content]="file.content"
         [language]="file.language"
         (contentChange)="onContentChange(file.filename, $event)"
+        (saveRequested)="onSave(file.filename)"
       />
     }
   </div>

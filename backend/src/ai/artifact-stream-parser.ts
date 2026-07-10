@@ -96,7 +96,10 @@ export class ArtifactStreamParser {
         );
         const safeLength = this.buffer.length - holdBack;
         if (safeLength > 0) {
-          segments.push({ type: 'prose', text: this.buffer.slice(0, safeLength) });
+          segments.push({
+            type: 'prose',
+            text: this.buffer.slice(0, safeLength),
+          });
           this.buffer = this.buffer.slice(safeLength);
           this.atMessageStart = false;
         }
@@ -112,10 +115,16 @@ export class ArtifactStreamParser {
           continue;
         }
 
-        const holdBack = suspiciousTailLength(this.buffer, '\n```');
+        const holdBack = Math.max(
+          suspiciousTailLength(this.buffer, '\n```'),
+          this.buffer.endsWith('```') ? 3 : 0,
+        );
         const safeLength = this.buffer.length - holdBack;
         if (safeLength > 0) {
-          segments.push({ type: 'artifact-chunk', text: this.buffer.slice(0, safeLength) });
+          segments.push({
+            type: 'artifact-chunk',
+            text: this.buffer.slice(0, safeLength),
+          });
           this.buffer = this.buffer.slice(safeLength);
         }
         break;
@@ -127,11 +136,18 @@ export class ArtifactStreamParser {
 
   /** Call once at end-of-stream to flush anything still held back. */
   flush(): ParsedSegment[] {
-    if (!this.buffer) return [];
+    if (!this.buffer) {
+      if (!this.inBlock) return [];
+      this.inBlock = false;
+      return [{ type: 'artifact-end' }];
+    }
     const segments: ParsedSegment[] = [];
     if (this.inBlock) {
-      segments.push({ type: 'artifact-chunk', text: this.buffer });
+      const closingFence = this.buffer.endsWith('```');
+      const content = closingFence ? this.buffer.slice(0, -3) : this.buffer;
+      if (content) segments.push({ type: 'artifact-chunk', text: content });
       segments.push({ type: 'artifact-end' });
+      this.inBlock = false;
     } else {
       segments.push({ type: 'prose', text: this.buffer });
     }

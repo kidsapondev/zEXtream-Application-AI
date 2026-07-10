@@ -69,7 +69,11 @@ export interface ServerToClientEvents {
     language: string;
   }) => void;
   'artifact:stream:chunk': (payload: { tempId: string; delta: string }) => void;
-  'artifact:stream:end': (payload: { tempId: string; realArtifactId: string }) => void;
+  'artifact:stream:end': (payload: {
+    tempId: string;
+    realArtifactId: string;
+    artifact?: CodeArtifactDto;
+  }) => void;
   'artifact:created': (payload: { artifact: CodeArtifactDto }) => void;
   error: (payload: { code: string; message: string }) => void;
 }

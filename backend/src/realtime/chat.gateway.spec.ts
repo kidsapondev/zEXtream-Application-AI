@@ -67,6 +67,10 @@ describe('ChatGateway chat:send failure handling', () => {
     register: jest.fn(),
     release: jest.fn(),
   };
+  const artifactsService = {
+    createRevision: jest.fn(),
+    listLatestForSession: jest.fn(),
+  };
   const emit = jest.fn<(event: string, payload: unknown) => void>();
 
   const gateway = new ChatGateway(
@@ -76,7 +80,7 @@ describe('ChatGateway chat:send failure handling', () => {
     messagesService as never,
     aiProviderFactory as never,
     streamRegistry as never,
-    { createRevision: jest.fn() } as never,
+    artifactsService as never,
   );
 
   gateway.server = { to: jest.fn(() => ({ emit })) } as never;
@@ -101,6 +105,7 @@ describe('ChatGateway chat:send failure handling', () => {
       content: '',
     });
     messagesService.listForSession.mockResolvedValue([]);
+    artifactsService.listLatestForSession.mockResolvedValue([]);
     messagesService.finalizeAssistantMessage.mockImplementation(
       (
         _id: string,

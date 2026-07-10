@@ -33,6 +33,7 @@ export class MonacoEditorComponent implements AfterViewInit {
   readonly language = input<string>('plaintext');
   readonly readOnly = input<boolean>(false);
   readonly contentChange = output<string>();
+  readonly saveRequested = output<void>();
 
   private readonly hostRef = viewChild.required<ElementRef<HTMLDivElement>>('host');
   private readonly destroyRef = inject(DestroyRef);
@@ -88,6 +89,13 @@ export class MonacoEditorComponent implements AfterViewInit {
     editor.onDidChangeModelContent(() => {
       if (this.applyingExternalValue) return;
       this.contentChange.emit(editor.getValue());
+    });
+
+    editor.addAction({
+      id: 'save-artifact',
+      label: 'Save artifact',
+      keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS],
+      run: () => this.saveRequested.emit(),
     });
 
     this.destroyRef.onDestroy(() => editor.dispose());

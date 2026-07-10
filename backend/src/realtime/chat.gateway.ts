@@ -31,6 +31,19 @@ const SYSTEM_PROMPT = `When you write code that creates or edits a file, wrap it
 \`\`\`
 Always include the filename after a colon in the fence info string. For short inline snippets that aren't a file, use regular single backticks instead.`;
 
+function artifactContextMessage(
+  artifacts: Array<{ filename: string; language: string; content: string }>,
+): string | null {
+  if (artifacts.length === 0) return null;
+  const files = artifacts
+    .map(
+      (artifact) =>
+        `<file path="${artifact.filename}" language="${artifact.language}">\n${artifact.content}\n</file>`,
+    )
+    .join('\n\n');
+  return `These are the latest files in the current workspace. Preserve them when making edits and use their exact relative paths:\n${files}`;
+}
+
 @WebSocketGateway({
   path: '/ws/socket.io',
   cors: { origin: process.env.CORS_ORIGIN, credentials: true },
@@ -161,8 +174,15 @@ export class ChatGateway implements OnGatewayConnection {
       .emit('chat:message:created', { message: assistantMessage });
 
     const history = await this.messagesService.listForSession(body.sessionId);
+    const latestArtifacts = await this.artifactsService.listLatestForSession(
+      body.sessionId,
+    );
+    const currentFiles = artifactContextMessage(latestArtifacts);
     const aiMessages: AiMessage[] = [
       { role: 'system', content: SYSTEM_PROMPT },
+      ...(currentFiles
+        ? [{ role: 'system' as const, content: currentFiles }]
+        : []),
       ...history
         .filter((m) => m.id !== assistantMessage.id)
         .map((m) => ({
@@ -226,6 +246,7 @@ export class ChatGateway implements OnGatewayConnection {
           this.server.to(room).emit('artifact:stream:end', {
             tempId: currentArtifact.tempId,
             realArtifactId: saved.id,
+            artifact: saved,
           });
           currentArtifact = null;
         }

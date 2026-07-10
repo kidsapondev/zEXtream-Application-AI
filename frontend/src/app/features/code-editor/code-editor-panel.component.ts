@@ -14,4 +14,8 @@ export class CodeEditorPanelComponent {
   onContentChange(filename: string, content: string) {
     this.artifactStore.editContent(filename, content);
   }
+
+  onSave(filename: string) {
+    this.artifactStore.saveContent(filename);
+  }
 }
