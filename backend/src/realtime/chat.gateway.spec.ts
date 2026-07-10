@@ -1,6 +1,7 @@
 import { Socket } from 'socket.io';
 import { WsException } from '@nestjs/websockets';
 import { ChatGateway } from './chat.gateway';
+import { MAX_ARTIFACT_CONTENT_BYTES } from '../artifacts/artifacts.service';
 
 describe('ChatGateway chat:stop', () => {
   const messagesService = {
@@ -162,5 +163,34 @@ describe('ChatGateway chat:send failure handling', () => {
       'upstream unavailable',
     );
     expect(streamRegistry.release).toHaveBeenCalledWith('assistant-message');
+  });
+
+  it('fails an oversized AI artifact without persisting a partial revision', async () => {
+    aiProviderFactory.hasProvider.mockReturnValue(true);
+    aiProviderFactory.getProvider.mockReturnValue({
+      async *streamChat() {
+        yield {
+          type: 'token' as const,
+          delta: `\`\`\`typescript:src/too-large.ts\n${'a'.repeat(
+            MAX_ARTIFACT_CONTENT_BYTES + 1,
+          )}`,
+        };
+        yield { type: 'done' as const, finishReason: 'complete' as const };
+      },
+    });
+    streamRegistry.register.mockReturnValue(new AbortController());
+
+    await gateway.onChatSend(client, {
+      sessionId: 'session-1',
+      content: 'create a huge file',
+    });
+
+    expect(artifactsService.createRevision).not.toHaveBeenCalled();
+    expect(messagesService.finalizeAssistantMessage).toHaveBeenCalledWith(
+      'assistant-message',
+      '',
+      'error',
+      `Artifact content must not exceed ${MAX_ARTIFACT_CONTENT_BYTES} bytes`,
+    );
   });
 });

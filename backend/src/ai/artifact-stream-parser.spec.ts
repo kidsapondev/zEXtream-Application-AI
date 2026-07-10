@@ -52,4 +52,50 @@ describe('ArtifactStreamParser', () => {
       { type: 'artifact-end' },
     ]);
   });
+
+  it('recognizes an opening fence split after the initial backticks', () => {
+    const parser = new ArtifactStreamParser();
+
+    expect(parser.push('```')).toEqual([]);
+    expect([
+      ...parser.push(
+        'typescript:src/example.ts\nexport const value = 1;\n```\n',
+      ),
+      ...parser.flush(),
+    ]).toEqual([
+      {
+        type: 'artifact-start',
+        language: 'typescript',
+        filename: 'src/example.ts',
+      },
+      { type: 'artifact-chunk', text: 'export const value = 1;\n' },
+      { type: 'artifact-end' },
+    ]);
+  });
+
+  it('keeps a token-split fence header until its newline arrives', () => {
+    const parser = new ArtifactStreamParser();
+    const chunks = [
+      '```',
+      'typescript',
+      ':',
+      'src/',
+      'artifact.ts',
+      '\n',
+      'export {}\n',
+      '```\n',
+    ];
+    const segments = chunks.flatMap((chunk) => parser.push(chunk));
+
+    expect([...segments, ...parser.flush()]).toEqual([
+      {
+        type: 'artifact-start',
+        language: 'typescript',
+        filename: 'src/artifact.ts',
+      },
+      { type: 'artifact-chunk', text: 'export {}' },
+      { type: 'artifact-chunk', text: '\n' },
+      { type: 'artifact-end' },
+    ]);
+  });
 });

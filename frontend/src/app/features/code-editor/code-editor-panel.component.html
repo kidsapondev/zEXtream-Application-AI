@@ -1,26 +1,91 @@
 <div class="code-editor-panel">
-  <div class="code-editor-panel__tabs">
-    @for (filename of artifactStore.openTabs(); track filename) {
-      <button
-        type="button"
-        class="tab"
-        [class.tab--active]="filename === artifactStore.activeFilename()"
-        (click)="artifactStore.selectTab(filename)"
-      >
-        {{ filename }}
-        <span class="tab__close" (click)="$event.stopPropagation(); artifactStore.closeTab(filename)">×</span>
-      </button>
-    }
+  <div class="code-editor-panel__toolbar">
+    <div class="code-editor-panel__tabs">
+      @for (filename of artifactStore.openTabs(); track filename) {
+        <button
+          type="button"
+          class="tab"
+          [class.tab--active]="filename === artifactStore.activeFilename()"
+          (click)="artifactStore.selectTab(filename)"
+        >
+          {{ filename }}
+          <span
+            class="tab__close"
+            (click)="$event.stopPropagation(); artifactStore.closeTab(filename)"
+            >×</span
+          >
+        </button>
+      }
+    </div>
+
+    <button
+      type="button"
+      class="history-toggle"
+      [class.history-toggle--active]="artifactStore.isRevisionHistoryOpen()"
+      [disabled]="!artifactStore.activeFile()"
+      (click)="artifactStore.toggleRevisionHistory()"
+    >
+      History
+    </button>
   </div>
 
-  <div class="code-editor-panel__editor">
-    @if (artifactStore.activeFile(); as file) {
-      <app-monaco-editor
-        [content]="file.content"
-        [language]="file.language"
-        (contentChange)="onContentChange(file.filename, $event)"
-        (saveRequested)="onSave(file.filename)"
-      />
+  <div class="code-editor-panel__body">
+    @if (artifactStore.isRevisionHistoryOpen()) {
+      <aside class="revision-history" aria-label="Revision history">
+        <div class="revision-history__heading">Revision history</div>
+        @if (artifactStore.isRevisionHistoryLoading()) {
+          <p class="revision-history__status">Loading revisions…</p>
+        } @else if (artifactStore.revisionHistoryError(); as error) {
+          <p class="revision-history__status">{{ error }}</p>
+        } @else if (artifactStore.revisionHistory().length === 0) {
+          <p class="revision-history__status">No saved revisions yet.</p>
+        } @else {
+          <div class="revision-history__list">
+            @for (revision of artifactStore.revisionHistory(); track revision.id) {
+              <button
+                type="button"
+                class="revision-history__item"
+                [class.revision-history__item--selected]="
+                  revision.id === artifactStore.selectedRevisionId()
+                "
+                (click)="artifactStore.selectRevision(revision.id)"
+              >
+                <span>Revision {{ revision.revision }}</span>
+                <small>{{ revision.origin }} · {{ revision.createdAt | date: 'short' }}</small>
+              </button>
+            }
+          </div>
+        }
+      </aside>
     }
+
+    <div class="code-editor-panel__editor">
+      @if (artifactStore.activeFile(); as file) {
+        @if (artifactStore.comparedRevision(); as revision) {
+          <div class="code-editor-panel__diff-heading">
+            <span>Comparing revision {{ revision.revision }} with current</span>
+            <button
+              type="button"
+              class="diff-close"
+              (click)="artifactStore.clearRevisionComparison()"
+            >
+              Back to editor
+            </button>
+          </div>
+          <app-monaco-diff-editor
+            [original]="revision.content"
+            [modified]="file.content"
+            [language]="file.language"
+          />
+        } @else {
+          <app-monaco-editor
+            [content]="file.content"
+            [language]="file.language"
+            (contentChange)="onContentChange(file.filename, $event)"
+            (saveRequested)="onSave(file.filename)"
+          />
+        }
+      }
+    </div>
   </div>
 </div>

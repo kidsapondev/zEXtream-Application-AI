@@ -29,10 +29,17 @@ export class ArtifactStore {
   private readonly artifacts = signal<Map<string, CodeArtifactDto>>(new Map());
   /** Artifacts currently being written by the AI, keyed by tempId. */
   private readonly streaming = signal<Map<string, StreamingArtifact>>(new Map());
+  private revisionLoadGeneration = 0;
 
   readonly openTabs = signal<string[]>([]);
   readonly activeFilename = signal<string | null>(null);
   readonly currentSessionId = signal<string | null>(null);
+  readonly revisionHistory = signal<CodeArtifactDto[]>([]);
+  readonly revisionHistoryFilename = signal<string | null>(null);
+  readonly selectedRevisionId = signal<string | null>(null);
+  readonly isRevisionHistoryOpen = signal(false);
+  readonly isRevisionHistoryLoading = signal(false);
+  readonly revisionHistoryError = signal<string | null>(null);
 
   readonly files = computed(() => {
     const finished = [...this.artifacts().values()].map((a) => ({
@@ -59,6 +66,18 @@ export class ArtifactStore {
   readonly activeFile = computed(
     () => this.files().find((f) => f.filename === this.activeFilename()) ?? null,
   );
+
+  readonly selectedRevision = computed(
+    () =>
+      this.revisionHistory().find((revision) => revision.id === this.selectedRevisionId()) ?? null,
+  );
+
+  readonly comparedRevision = computed(() => {
+    const activeFile = this.activeFile();
+    const selectedRevision = this.selectedRevision();
+    if (!activeFile || !selectedRevision || selectedRevision.id === activeFile.id) return null;
+    return selectedRevision;
+  });
 
   constructor() {
     const socket = this.socketService.connect();
@@ -101,25 +120,20 @@ export class ArtifactStore {
       (payload: { tempId: string; realArtifactId: string; artifact?: CodeArtifactDto }) => {
         const streamingEntry = this.streaming().get(payload.tempId);
         if (streamingEntry && streamingEntry.sessionId === this.currentSessionId()) {
-          this.artifacts.update((map) => {
-            const next = new Map(map);
-            next.set(
-              streamingEntry.filename,
-              payload.artifact ?? {
-                id: payload.realArtifactId,
-                messageId: streamingEntry.messageId,
-                sessionId: streamingEntry.sessionId,
-                filename: streamingEntry.filename,
-                language: streamingEntry.language,
-                content: streamingEntry.content,
-                revision: 0,
-                parentArtifactId: null,
-                origin: 'ai',
-                createdAt: new Date().toISOString(),
-              },
-            );
-            return next;
-          });
+          this.upsertArtifact(
+            payload.artifact ?? {
+              id: payload.realArtifactId,
+              messageId: streamingEntry.messageId,
+              sessionId: streamingEntry.sessionId,
+              filename: streamingEntry.filename,
+              language: streamingEntry.language,
+              content: streamingEntry.content,
+              revision: 0,
+              parentArtifactId: null,
+              origin: 'ai',
+              createdAt: new Date().toISOString(),
+            },
+          );
         }
         this.streaming.update((map) => {
           const next = new Map(map);
@@ -131,11 +145,7 @@ export class ArtifactStore {
 
     socket.on('artifact:created', (payload: { artifact: CodeArtifactDto }) => {
       if (payload.artifact.sessionId !== this.currentSessionId()) return;
-      this.artifacts.update((map) => {
-        const next = new Map(map);
-        next.set(payload.artifact.filename, payload.artifact);
-        return next;
-      });
+      this.upsertArtifact(payload.artifact);
     });
   }
 
@@ -147,6 +157,7 @@ export class ArtifactStore {
     this.streaming.set(new Map());
     this.openTabs.set([]);
     this.activeFilename.set(null);
+    this.resetRevisionHistory();
 
     const list = await firstValueFrom(
       this.http.get<CodeArtifactDto[]>(`/api/chat/sessions/${sessionId}/artifacts`),
@@ -162,6 +173,7 @@ export class ArtifactStore {
 
   selectTab(filename: string): void {
     this.activeFilename.set(filename);
+    if (this.isRevisionHistoryOpen()) void this.loadRevisionHistory(filename);
   }
 
   closeTab(filename: string): void {
@@ -169,7 +181,33 @@ export class ArtifactStore {
     if (this.activeFilename() === filename) {
       const remaining = this.openTabs();
       this.activeFilename.set(remaining.length > 0 ? remaining[remaining.length - 1] : null);
+      if (this.isRevisionHistoryOpen()) {
+        const nextFilename = this.activeFilename();
+        if (nextFilename) void this.loadRevisionHistory(nextFilename);
+        else this.resetRevisionHistory();
+      }
     }
+  }
+
+  async toggleRevisionHistory(): Promise<void> {
+    if (this.isRevisionHistoryOpen()) {
+      this.isRevisionHistoryOpen.set(false);
+      this.selectedRevisionId.set(null);
+      return;
+    }
+
+    const filename = this.activeFilename();
+    if (!filename) return;
+    this.isRevisionHistoryOpen.set(true);
+    await this.loadRevisionHistory(filename);
+  }
+
+  selectRevision(revisionId: string): void {
+    this.selectedRevisionId.set(revisionId);
+  }
+
+  clearRevisionComparison(): void {
+    this.selectedRevisionId.set(null);
   }
 
   editContent(filename: string, content: string): void {
@@ -206,6 +244,66 @@ export class ArtifactStore {
     const artifact = this.artifacts().get(filename);
     if (!artifact || artifact.id !== artifactId) return;
     this.socketService.instance.emit('artifact:edit', { artifactId, content });
+  }
+
+  private async loadRevisionHistory(filename: string): Promise<void> {
+    const sessionId = this.currentSessionId();
+    if (!sessionId) return;
+
+    const generation = ++this.revisionLoadGeneration;
+    this.isRevisionHistoryLoading.set(true);
+    this.revisionHistoryFilename.set(filename);
+    this.selectedRevisionId.set(null);
+    this.revisionHistory.set([]);
+    this.revisionHistoryError.set(null);
+
+    try {
+      const revisions = await firstValueFrom(
+        this.http.get<CodeArtifactDto[]>(
+          `/api/chat/sessions/${sessionId}/artifacts/revisions?filename=${encodeURIComponent(filename)}`,
+        ),
+      );
+      if (
+        generation !== this.revisionLoadGeneration ||
+        !this.isRevisionHistoryOpen() ||
+        this.currentSessionId() !== sessionId ||
+        this.activeFilename() !== filename
+      ) {
+        return;
+      }
+      this.revisionHistory.set(revisions);
+    } catch {
+      if (generation === this.revisionLoadGeneration) {
+        this.revisionHistory.set([]);
+        this.revisionHistoryError.set('Could not load revision history.');
+      }
+    } finally {
+      if (generation === this.revisionLoadGeneration) this.isRevisionHistoryLoading.set(false);
+    }
+  }
+
+  private upsertArtifact(artifact: CodeArtifactDto): void {
+    this.artifacts.update((map) => {
+      const next = new Map(map);
+      next.set(artifact.filename, artifact);
+      return next;
+    });
+
+    if (this.revisionHistoryFilename() !== artifact.filename) return;
+    this.revisionHistory.update((revisions) => {
+      const withoutUpdatedRevision = revisions.filter((revision) => revision.id !== artifact.id);
+      return [...withoutUpdatedRevision, artifact].sort((a, b) => a.revision - b.revision);
+    });
+  }
+
+  private resetRevisionHistory(): void {
+    this.revisionLoadGeneration += 1;
+    this.revisionHistory.set([]);
+    this.revisionHistoryFilename.set(null);
+    this.selectedRevisionId.set(null);
+    this.isRevisionHistoryOpen.set(false);
+    this.isRevisionHistoryLoading.set(false);
+    this.revisionHistoryError.set(null);
   }
 
   private cancelPendingSaves(): void {

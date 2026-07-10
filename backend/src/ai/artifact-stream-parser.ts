@@ -62,6 +62,12 @@ function suspiciousTailLength(text: string, marker: string): number {
   return 0;
 }
 
+/** Holds a possible opening fence header until its newline confirms or rejects it. */
+function pendingFenceHeaderLength(buffer: string): number {
+  const tail = buffer.slice(buffer.lastIndexOf('\n') + 1);
+  return /^```[a-zA-Z0-9_+-]*(?::\S*)?$/.test(tail) ? tail.length : 0;
+}
+
 const FENCE_OPEN_RE = /```([a-zA-Z0-9_+-]*)(?::(\S+))?\r?\n/g;
 const FENCE_CLOSE_RE = /```\r?\n/g;
 
@@ -92,6 +98,7 @@ export class ArtifactStreamParser {
 
         const holdBack = Math.max(
           suspiciousTailLength(this.buffer, '\n```'),
+          pendingFenceHeaderLength(this.buffer),
           this.atMessageStart ? suspiciousTailLength(this.buffer, '```') : 0,
         );
         const safeLength = this.buffer.length - holdBack;

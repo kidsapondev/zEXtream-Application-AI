@@ -1,4 +1,13 @@
-import { AfterViewInit, Component, DestroyRef, ElementRef, effect, inject, input, viewChild } from '@angular/core';
+import {
+  AfterViewInit,
+  Component,
+  DestroyRef,
+  ElementRef,
+  effect,
+  inject,
+  input,
+  viewChild,
+} from '@angular/core';
 import { loadMonaco } from './monaco-loader';
 import type * as Monaco from 'monaco-editor';
 
@@ -37,10 +46,7 @@ export class MonacoDiffEditorComponent implements AfterViewInit {
       const monaco = this.monaco;
       if (!monaco || !this.diffEditor) return;
 
-      this.diffEditor.setModel({
-        original: monaco.editor.createModel(original, language),
-        modified: monaco.editor.createModel(modified, language),
-      });
+      this.replaceModels(original, modified, language);
     });
   }
 
@@ -53,12 +59,25 @@ export class MonacoDiffEditorComponent implements AfterViewInit {
       readOnly: true,
       renderSideBySide: true,
     });
-    diffEditor.setModel({
-      original: monaco.editor.createModel(this.original(), this.language()),
-      modified: monaco.editor.createModel(this.modified(), this.language()),
-    });
     this.diffEditor = diffEditor;
+    this.replaceModels(this.original(), this.modified(), this.language());
 
-    this.destroyRef.onDestroy(() => diffEditor.dispose());
+    this.destroyRef.onDestroy(() => {
+      const models = diffEditor.getModel();
+      models?.original.dispose();
+      models?.modified.dispose();
+      diffEditor.dispose();
+    });
+  }
+
+  private replaceModels(original: string, modified: string, language: string): void {
+    if (!this.monaco || !this.diffEditor) return;
+    const previousModels = this.diffEditor.getModel();
+    this.diffEditor.setModel({
+      original: this.monaco.editor.createModel(original, language),
+      modified: this.monaco.editor.createModel(modified, language),
+    });
+    previousModels?.original.dispose();
+    previousModels?.modified.dispose();
   }
 }

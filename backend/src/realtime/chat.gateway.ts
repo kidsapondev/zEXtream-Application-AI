@@ -18,7 +18,11 @@ import { AiProviderFactory } from '../ai/ai-provider.factory';
 import { ActiveStreamRegistry } from './active-stream-registry.service';
 import { AiMessage, AiProviderKey } from '../ai/ai-provider.interface';
 import { ArtifactStreamParser } from '../ai/artifact-stream-parser';
-import { ArtifactsService } from '../artifacts/artifacts.service';
+import {
+  ArtifactsService,
+  assertArtifactContentBytes,
+  normalizeArtifactFilename,
+} from '../artifacts/artifacts.service';
 
 interface AccessTokenPayload {
   sub: string;
@@ -202,6 +206,7 @@ export class ChatGateway implements OnGatewayConnection {
       filename: string;
       language: string;
       content: string;
+      contentBytes: number;
     } | null = null;
 
     const handleSegments = async (
@@ -217,9 +222,10 @@ export class ChatGateway implements OnGatewayConnection {
         } else if (segment.type === 'artifact-start') {
           currentArtifact = {
             tempId: randomUUID(),
-            filename: segment.filename,
+            filename: normalizeArtifactFilename(segment.filename),
             language: segment.language,
             content: '',
+            contentBytes: 0,
           };
           this.server.to(room).emit('artifact:stream:start', {
             tempId: currentArtifact.tempId,
@@ -229,7 +235,19 @@ export class ChatGateway implements OnGatewayConnection {
             language: currentArtifact.language,
           });
         } else if (segment.type === 'artifact-chunk' && currentArtifact) {
+          const chunkBytes = Buffer.byteLength(segment.text, 'utf8');
+          try {
+            assertArtifactContentBytes(
+              currentArtifact.contentBytes + chunkBytes,
+            );
+          } catch (error) {
+            // Do not let the final parser flush turn an oversized partial stream
+            // into an empty artifact revision after the stream has failed.
+            currentArtifact = null;
+            throw error;
+          }
           currentArtifact.content += segment.text;
+          currentArtifact.contentBytes += chunkBytes;
           this.server.to(room).emit('artifact:stream:chunk', {
             tempId: currentArtifact.tempId,
             delta: segment.text,

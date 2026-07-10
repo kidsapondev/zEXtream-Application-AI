@@ -99,4 +99,50 @@ describe('ArtifactStore', () => {
     expect(service.currentSessionId()).toBe('session-2');
     expect(service.files()).toEqual([]);
   });
+
+  it('loads revisions and exposes an earlier revision for comparison', async () => {
+    const service = TestBed.inject(ArtifactStore);
+    const http = TestBed.inject(HttpTestingController);
+    const revisionTwo: CodeArtifactDto = {
+      ...artifact,
+      id: 'artifact-2',
+      content: 'two',
+      revision: 2,
+      parentArtifactId: artifact.id,
+      origin: 'user',
+    };
+    const initialLoading = service.loadSession('session-1');
+    http.expectOne('/api/chat/sessions/session-1/artifacts').flush([revisionTwo]);
+    await initialLoading;
+
+    const loading = service.toggleRevisionHistory();
+    http
+      .expectOne('/api/chat/sessions/session-1/artifacts/revisions?filename=main.ts')
+      .flush([artifact, revisionTwo]);
+    await loading;
+
+    expect(service.isRevisionHistoryOpen()).toBe(true);
+    expect(service.revisionHistory()).toEqual([artifact, revisionTwo]);
+    service.selectRevision(artifact.id);
+
+    expect(service.comparedRevision()).toEqual(artifact);
+  });
+
+  it('does not apply a stale revision response after the session changes', async () => {
+    const service = TestBed.inject(ArtifactStore);
+    const http = TestBed.inject(HttpTestingController);
+    await loadInitial(service, http);
+
+    const revisionLoading = service.toggleRevisionHistory();
+    const revisionRequest = http.expectOne(
+      '/api/chat/sessions/session-1/artifacts/revisions?filename=main.ts',
+    );
+    const nextSessionLoading = service.loadSession('session-2');
+    http.expectOne('/api/chat/sessions/session-2/artifacts').flush([]);
+    revisionRequest.flush([artifact]);
+    await Promise.all([revisionLoading, nextSessionLoading]);
+
+    expect(service.isRevisionHistoryOpen()).toBe(false);
+    expect(service.revisionHistory()).toEqual([]);
+  });
 });

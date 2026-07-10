@@ -8,9 +8,16 @@
   background: var(--color-canvas-raised);
 }
 
-.code-editor-panel__tabs {
+.code-editor-panel__toolbar {
   display: flex;
   border-bottom: 1px solid var(--color-hairline);
+  min-width: 0;
+}
+
+.code-editor-panel__tabs {
+  display: flex;
+  flex: 1;
+  min-width: 0;
   overflow-x: auto;
 }
 
@@ -42,7 +49,103 @@
   }
 }
 
-.code-editor-panel__editor {
+.history-toggle,
+.diff-close {
+  border: none;
+  background: var(--color-canvas);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font-size: 12px;
+  padding: var(--space-2) var(--space-3);
+  white-space: nowrap;
+}
+
+.history-toggle {
+  border-left: 1px solid var(--color-hairline);
+}
+
+.history-toggle:hover:not(:disabled),
+.history-toggle--active,
+.diff-close:hover {
+  background: var(--color-hairline);
+  color: var(--color-ink);
+}
+
+.history-toggle:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.code-editor-panel__body {
+  display: flex;
   flex: 1;
   min-height: 0;
+}
+
+.revision-history {
+  display: flex;
+  flex: 0 0 11rem;
+  flex-direction: column;
+  border-right: 1px solid var(--color-hairline);
+  background: var(--color-canvas);
+  min-width: 0;
+}
+
+.revision-history__heading {
+  border-bottom: 1px solid var(--color-hairline);
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  padding: var(--space-2) var(--space-3);
+}
+
+.revision-history__list {
+  overflow-y: auto;
+}
+
+.revision-history__item {
+  align-items: flex-start;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--color-hairline);
+  color: var(--color-ink);
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-2) var(--space-3);
+  text-align: left;
+  width: 100%;
+}
+
+.revision-history__item:hover,
+.revision-history__item--selected {
+  background: var(--color-hairline);
+}
+
+.revision-history__item small,
+.revision-history__status {
+  color: var(--color-text-muted);
+  font-size: 11px;
+}
+
+.revision-history__status {
+  margin: var(--space-3);
+}
+
+.code-editor-panel__editor {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.code-editor-panel__diff-heading {
+  align-items: center;
+  border-bottom: 1px solid var(--color-hairline);
+  color: var(--color-text-secondary);
+  display: flex;
+  font-size: 12px;
+  justify-content: space-between;
+  padding-left: var(--space-3);
 }
