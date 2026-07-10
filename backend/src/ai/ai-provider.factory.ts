@@ -12,6 +12,10 @@ export class AiProviderFactory implements OnModuleInit {
     this.providers.set(this.ollamaProvider.key, this.ollamaProvider);
   }
 
+  hasProvider(key: AiProviderKey): boolean {
+    return this.providers.has(key);
+  }
+
   getProvider(key: AiProviderKey): AiProvider {
     const provider = this.providers.get(key);
     if (!provider) {

@@ -5,6 +5,7 @@ import {
   SubscribeMessage,
   WebSocketGateway,
   WebSocketServer,
+  WsException,
 } from '@nestjs/websockets';
 import { Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
@@ -60,25 +61,39 @@ export class ChatGateway implements OnGatewayConnection {
       const payload = this.jwtService.verify<AccessTokenPayload>(token, {
         secret: this.configService.getOrThrow<string>('JWT_ACCESS_SECRET'),
       });
-      client.data.userId = payload.sub;
+      this.socketData(client)['userId'] = payload.sub;
     } catch {
       client.disconnect();
     }
   }
 
   @SubscribeMessage('session:join')
-  async onSessionJoin(@ConnectedSocket() client: Socket, @MessageBody() body: { sessionId: string }) {
-    await this.sessionsService.getOwned(client.data.userId, body.sessionId);
-    client.join(this.roomName(body.sessionId));
+  async onSessionJoin(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() body: { sessionId: string },
+  ) {
+    await this.sessionsService.getOwned(this.userId(client), body.sessionId);
+    await client.join(this.roomName(body.sessionId));
   }
 
   @SubscribeMessage('session:leave')
-  onSessionLeave(@ConnectedSocket() client: Socket, @MessageBody() body: { sessionId: string }) {
-    client.leave(this.roomName(body.sessionId));
+  async onSessionLeave(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() body: { sessionId: string },
+  ) {
+    await client.leave(this.roomName(body.sessionId));
   }
 
   @SubscribeMessage('chat:stop')
-  onChatStop(@MessageBody() body: { messageId: string }) {
+  async onChatStop(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() body: { messageId: string },
+  ) {
+    const isOwner = await this.messagesService.isOwnedByUser(
+      body.messageId,
+      this.userId(client),
+    );
+    if (!isOwner) return;
     this.streamRegistry.stop(body.messageId);
   }
 
@@ -89,7 +104,10 @@ export class ChatGateway implements OnGatewayConnection {
   ) {
     const existing = await this.artifactsService.getById(body.artifactId);
     if (!existing) return;
-    await this.sessionsService.getOwned(client.data.userId, existing.sessionId);
+    await this.sessionsService.getOwned(
+      this.userId(client),
+      existing.sessionId,
+    );
 
     const updated = await this.artifactsService.createRevision({
       sessionId: existing.sessionId,
@@ -99,57 +117,90 @@ export class ChatGateway implements OnGatewayConnection {
       content: body.content,
       origin: 'user',
     });
-    this.server.to(this.roomName(existing.sessionId)).emit('artifact:created', { artifact: updated });
+    this.server
+      .to(this.roomName(existing.sessionId))
+      .emit('artifact:created', { artifact: updated });
   }
 
   @SubscribeMessage('chat:send')
   async onChatSend(
     @ConnectedSocket() client: Socket,
-    @MessageBody() body: { sessionId: string; content: string; provider?: AiProviderKey; model?: string },
+    @MessageBody()
+    body: {
+      sessionId: string;
+      content: string;
+      provider?: AiProviderKey;
+      model?: string;
+    },
   ) {
-    const userId = client.data.userId as string;
+    const userId = this.userId(client);
     const session = await this.sessionsService.getOwned(userId, body.sessionId);
     const room = this.roomName(body.sessionId);
+    const providerKey = body.provider ?? session.defaultProvider;
+    const model = body.model ?? session.defaultModel;
 
-    const userMessage = await this.messagesService.createUserMessage(body.sessionId, body.content);
+    if (!this.aiProviderFactory.hasProvider(providerKey)) {
+      throw new WsException(`AI provider "${providerKey}" is not enabled`);
+    }
+
+    const userMessage = await this.messagesService.createUserMessage(
+      body.sessionId,
+      body.content,
+    );
     this.server.to(room).emit('chat:message:created', { message: userMessage });
     await this.sessionsService.touch(body.sessionId);
 
-    const providerKey = body.provider ?? (session.defaultProvider as AiProviderKey);
-    const model = body.model ?? session.defaultModel;
-
-    const assistantMessage = await this.messagesService.createPendingAssistantMessage(
-      body.sessionId,
-      providerKey,
-      model,
-    );
-    this.server.to(room).emit('chat:message:created', { message: assistantMessage });
+    const assistantMessage =
+      await this.messagesService.createPendingAssistantMessage(
+        body.sessionId,
+        providerKey,
+        model,
+      );
+    this.server
+      .to(room)
+      .emit('chat:message:created', { message: assistantMessage });
 
     const history = await this.messagesService.listForSession(body.sessionId);
     const aiMessages: AiMessage[] = [
       { role: 'system', content: SYSTEM_PROMPT },
       ...history
         .filter((m) => m.id !== assistantMessage.id)
-        .map((m) => ({ role: m.role as AiMessage['role'], content: m.content })),
+        .map((m) => ({
+          role: m.role,
+          content: m.content,
+        })),
     ];
-
-    const provider = this.aiProviderFactory.getProvider(providerKey);
-    const controller = this.streamRegistry.register(assistantMessage.id);
 
     const parser = new ArtifactStreamParser();
     let proseContent = '';
     let finalStatus: 'complete' | 'error' | 'stopped' = 'complete';
     let finalErrorMessage: string | undefined;
+    let controller: AbortController | undefined;
 
-    let currentArtifact: { tempId: string; filename: string; language: string; content: string } | null = null;
+    let currentArtifact: {
+      tempId: string;
+      filename: string;
+      language: string;
+      content: string;
+    } | null = null;
 
-    const handleSegments = async (segments: ReturnType<ArtifactStreamParser['push']>) => {
+    const handleSegments = async (
+      segments: ReturnType<ArtifactStreamParser['push']>,
+    ) => {
       for (const segment of segments) {
         if (segment.type === 'prose') {
           proseContent += segment.text;
-          this.server.to(room).emit('chat:token', { messageId: assistantMessage.id, delta: segment.text });
+          this.server.to(room).emit('chat:token', {
+            messageId: assistantMessage.id,
+            delta: segment.text,
+          });
         } else if (segment.type === 'artifact-start') {
-          currentArtifact = { tempId: randomUUID(), filename: segment.filename, language: segment.language, content: '' };
+          currentArtifact = {
+            tempId: randomUUID(),
+            filename: segment.filename,
+            language: segment.language,
+            content: '',
+          };
           this.server.to(room).emit('artifact:stream:start', {
             tempId: currentArtifact.tempId,
             sessionId: body.sessionId,
@@ -159,7 +210,10 @@ export class ChatGateway implements OnGatewayConnection {
           });
         } else if (segment.type === 'artifact-chunk' && currentArtifact) {
           currentArtifact.content += segment.text;
-          this.server.to(room).emit('artifact:stream:chunk', { tempId: currentArtifact.tempId, delta: segment.text });
+          this.server.to(room).emit('artifact:stream:chunk', {
+            tempId: currentArtifact.tempId,
+            delta: segment.text,
+          });
         } else if (segment.type === 'artifact-end' && currentArtifact) {
           const saved = await this.artifactsService.createRevision({
             sessionId: body.sessionId,
@@ -169,13 +223,19 @@ export class ChatGateway implements OnGatewayConnection {
             content: currentArtifact.content,
             origin: 'ai',
           });
-          this.server.to(room).emit('artifact:stream:end', { tempId: currentArtifact.tempId, realArtifactId: saved.id });
+          this.server.to(room).emit('artifact:stream:end', {
+            tempId: currentArtifact.tempId,
+            realArtifactId: saved.id,
+          });
           currentArtifact = null;
         }
       }
     };
 
     try {
+      const provider = this.aiProviderFactory.getProvider(providerKey);
+      controller = this.streamRegistry.register(assistantMessage.id);
+
       for await (const event of provider.streamChat({
         messages: aiMessages,
         model,
@@ -184,28 +244,71 @@ export class ChatGateway implements OnGatewayConnection {
         if (event.type === 'token') {
           await handleSegments(parser.push(event.delta));
         } else if (event.type === 'done') {
-          finalStatus = event.finishReason === 'stopped' ? 'stopped' : 'complete';
+          finalStatus =
+            event.finishReason === 'stopped' ? 'stopped' : 'complete';
         } else if (event.type === 'error') {
           finalStatus = 'error';
           finalErrorMessage = event.message;
-          this.logger.error(`AI stream error for message ${assistantMessage.id}: ${event.message}`);
+          this.logger.error(
+            `AI stream error for message ${assistantMessage.id}: ${event.message}`,
+          );
+          break;
         }
       }
-      await handleSegments(parser.flush());
+    } catch (error) {
+      finalStatus = controller?.signal.aborted ? 'stopped' : 'error';
+      finalErrorMessage =
+        error instanceof Error ? error.message : 'AI stream failed';
+      this.logger.error(
+        `AI stream failed for message ${assistantMessage.id}`,
+        error,
+      );
     } finally {
-      this.streamRegistry.release(assistantMessage.id);
-    }
+      try {
+        await handleSegments(parser.flush());
+      } catch (error) {
+        finalStatus = 'error';
+        finalErrorMessage =
+          error instanceof Error
+            ? error.message
+            : 'Failed to finalize streamed content';
+        this.logger.error(
+          `Artifact stream finalization failed for message ${assistantMessage.id}`,
+          error,
+        );
+      }
 
-    const updated = await this.messagesService.finalizeAssistantMessage(
-      assistantMessage.id,
-      proseContent,
-      finalStatus,
-      finalErrorMessage,
-    );
-    this.server.to(room).emit('chat:message:updated', { message: updated });
+      if (controller) {
+        this.streamRegistry.release(assistantMessage.id);
+      }
+
+      const updated = await this.messagesService.finalizeAssistantMessage(
+        assistantMessage.id,
+        proseContent,
+        finalStatus,
+        finalErrorMessage,
+      );
+      this.server.to(room).emit('chat:message:updated', { message: updated });
+    }
   }
 
   private roomName(sessionId: string): string {
     return `session:${sessionId}`;
+  }
+
+  private socketData(client: Socket): Record<string, unknown> {
+    const data: unknown = client.data;
+    if (!data || typeof data !== 'object') {
+      throw new WsException('Socket authentication state is invalid');
+    }
+    return data as Record<string, unknown>;
+  }
+
+  private userId(client: Socket): string {
+    const userId = this.socketData(client)['userId'];
+    if (typeof userId !== 'string' || !userId) {
+      throw new WsException('Socket is not authenticated');
+    }
+    return userId;
   }
 }

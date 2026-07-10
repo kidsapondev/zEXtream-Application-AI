@@ -1,6 +1,6 @@
 import { IsIn, IsOptional, IsString, MaxLength } from 'class-validator';
 
-const PROVIDERS = ['ollama', 'claude', 'openai'] as const;
+const ENABLED_PROVIDERS = ['ollama'] as const;
 
 export class CreateSessionDto {
   @IsOptional()
@@ -8,8 +8,8 @@ export class CreateSessionDto {
   @MaxLength(200)
   title?: string;
 
-  @IsIn(PROVIDERS)
-  defaultProvider!: (typeof PROVIDERS)[number];
+  @IsIn(ENABLED_PROVIDERS)
+  defaultProvider!: (typeof ENABLED_PROVIDERS)[number];
 
   @IsString()
   @MaxLength(200)

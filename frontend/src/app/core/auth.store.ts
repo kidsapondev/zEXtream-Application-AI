@@ -1,6 +1,8 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
+import 'tslib';
+import { SocketService } from './socket.service';
 
 export interface CurrentUser {
   id: string;
@@ -21,6 +23,7 @@ interface RefreshResponse {
 @Injectable({ providedIn: 'root' })
 export class AuthStore {
   private readonly http = inject(HttpClient);
+  private readonly socketService = inject(SocketService);
 
   readonly accessToken = signal<string | null>(null);
   readonly currentUser = signal<CurrentUser | null>(null);
@@ -34,6 +37,7 @@ export class AuthStore {
     );
     this.accessToken.set(res.accessToken);
     this.currentUser.set(res.user);
+    this.socketService.setAccessToken(res.accessToken);
   }
 
   async register(email: string, password: string, displayName: string): Promise<void> {
@@ -46,6 +50,7 @@ export class AuthStore {
     );
     this.accessToken.set(res.accessToken);
     this.currentUser.set(res.user);
+    this.socketService.setAccessToken(res.accessToken);
   }
 
   /**
@@ -67,11 +72,13 @@ export class AuthStore {
         this.http.post<RefreshResponse>('/api/auth/refresh', {}, { withCredentials: true }),
       );
       this.accessToken.set(res.accessToken);
+      this.socketService.setAccessToken(res.accessToken);
       await this.loadCurrentUser();
       return true;
     } catch {
       this.accessToken.set(null);
       this.currentUser.set(null);
+      this.socketService.disconnect();
       return false;
     }
   }
@@ -87,6 +94,7 @@ export class AuthStore {
     } finally {
       this.accessToken.set(null);
       this.currentUser.set(null);
+      this.socketService.disconnect();
     }
   }
 }

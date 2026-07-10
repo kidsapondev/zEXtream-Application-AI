@@ -24,7 +24,11 @@ export class MessagesService {
     });
   }
 
-  createPendingAssistantMessage(sessionId: string, provider: AiProviderKey, model: string) {
+  createPendingAssistantMessage(
+    sessionId: string,
+    provider: AiProviderKey,
+    model: string,
+  ) {
     return this.prisma.message.create({
       data: {
         sessionId,
@@ -35,6 +39,14 @@ export class MessagesService {
         streamingStatus: 'streaming',
       },
     });
+  }
+
+  async isOwnedByUser(messageId: string, userId: string): Promise<boolean> {
+    const message = await this.prisma.message.findFirst({
+      where: { id: messageId, session: { userId } },
+      select: { id: true },
+    });
+    return message !== null;
   }
 
   finalizeAssistantMessage(
@@ -53,7 +65,10 @@ export class MessagesService {
   async reconcileStuckMessages(sessionId: string) {
     await this.prisma.message.updateMany({
       where: { sessionId, streamingStatus: 'streaming' },
-      data: { streamingStatus: 'error', errorMessage: 'Generation was interrupted.' },
+      data: {
+        streamingStatus: 'error',
+        errorMessage: 'Generation was interrupted.',
+      },
     });
   }
 }

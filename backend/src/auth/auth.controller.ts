@@ -1,4 +1,12 @@
-import { Body, Controller, Post, Req, Res, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Post,
+  Req,
+  Res,
+  UnauthorizedException,
+  UseGuards,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { Request, Response } from 'express';
 import { AuthService } from './auth.service';
@@ -38,10 +46,25 @@ export class AuthController {
     };
   }
 
+  private refreshTokenFromRequest(req: Request): string {
+    const token: unknown = req.cookies?.[REFRESH_COOKIE_NAME];
+    if (typeof token !== 'string' || !token) {
+      throw new UnauthorizedException('Invalid refresh token');
+    }
+    return token;
+  }
+
   @Public()
   @Post('register')
-  async register(@Body() dto: RegisterDto, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
-    const { user, tokens } = await this.authService.register(dto, this.requestMeta(req));
+  async register(
+    @Body() dto: RegisterDto,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const { user, tokens } = await this.authService.register(
+      dto,
+      this.requestMeta(req),
+    );
     this.setRefreshCookie(res, tokens.refreshToken);
     return { user, accessToken: tokens.accessToken };
   }
@@ -49,9 +72,16 @@ export class AuthController {
   @Public()
   @UseGuards(LocalAuthGuard)
   @Post('login')
-  async login(@Req() req: Request, @Body() _dto: LoginDto, @Res({ passthrough: true }) res: Response) {
+  async login(
+    @Req() req: Request,
+    @Body() _dto: LoginDto,
+    @Res({ passthrough: true }) res: Response,
+  ) {
     const user = req.user as { id: string; email: string; displayName: string };
-    const { tokens } = await this.authService.login(user, this.requestMeta(req));
+    const { tokens } = await this.authService.login(
+      user,
+      this.requestMeta(req),
+    );
     this.setRefreshCookie(res, tokens.refreshToken);
     return { user, accessToken: tokens.accessToken };
   }
@@ -59,9 +89,17 @@ export class AuthController {
   @Public()
   @UseGuards(JwtRefreshGuard)
   @Post('refresh')
-  async refresh(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
+  async refresh(
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
     const { id, tokenId } = req.user as { id: string; tokenId: string };
-    const tokens = await this.authService.refresh(id, tokenId, this.requestMeta(req));
+    const tokens = await this.authService.refresh(
+      id,
+      tokenId,
+      this.refreshTokenFromRequest(req),
+      this.requestMeta(req),
+    );
     this.setRefreshCookie(res, tokens.refreshToken);
     return { accessToken: tokens.accessToken };
   }

@@ -4,11 +4,13 @@ dist/
 *.log
 .env
 .env.local
+login.md
 .DS_Store
 
 # IDE
 .vscode/*
 !.vscode/extensions.json
+.idea/
 
 # Docker volumes bind-mounted for local dev only
 postgres-data/

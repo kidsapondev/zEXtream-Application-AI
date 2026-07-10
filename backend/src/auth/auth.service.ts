@@ -1,8 +1,9 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
+import { Prisma } from '@prisma/client';
 import * as argon2 from 'argon2';
-import { createHash, randomUUID } from 'crypto';
+import { createHash, randomUUID, timingSafeEqual } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { UsersService } from '../users/users.service';
 
@@ -22,7 +23,12 @@ function parseDurationMs(duration: string): number {
     throw new Error(`Invalid duration string: ${duration}`);
   }
   const value = Number(match[1]);
-  const unitMs: Record<string, number> = { s: 1000, m: 60_000, h: 3_600_000, d: 86_400_000 };
+  const unitMs: Record<string, number> = {
+    s: 1000,
+    m: 60_000,
+    h: 3_600_000,
+    d: 86_400_000,
+  };
   return value * unitMs[match[2]];
 }
 
@@ -37,6 +43,14 @@ function hashToken(token: string): string {
   return createHash('sha256').update(token).digest('hex');
 }
 
+function tokenHashMatches(token: string, storedHash: string): boolean {
+  const actual = Buffer.from(hashToken(token), 'hex');
+  const expected = Buffer.from(storedHash, 'hex');
+  return actual.length === expected.length && timingSafeEqual(actual, expected);
+}
+
+class RefreshRotationConflictError extends Error {}
+
 @Injectable()
 export class AuthService {
   private readonly accessSecret: string;
@@ -50,10 +64,18 @@ export class AuthService {
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
   ) {
-    this.accessSecret = this.configService.getOrThrow<string>('JWT_ACCESS_SECRET');
-    this.refreshSecret = this.configService.getOrThrow<string>('JWT_REFRESH_SECRET');
-    this.accessExpiresIn = this.configService.get<string>('JWT_ACCESS_EXPIRES_IN', '15m');
-    this.refreshExpiresIn = this.configService.get<string>('JWT_REFRESH_EXPIRES_IN', '7d');
+    this.accessSecret =
+      this.configService.getOrThrow<string>('JWT_ACCESS_SECRET');
+    this.refreshSecret =
+      this.configService.getOrThrow<string>('JWT_REFRESH_SECRET');
+    this.accessExpiresIn = this.configService.get<string>(
+      'JWT_ACCESS_EXPIRES_IN',
+      '15m',
+    );
+    this.refreshExpiresIn = this.configService.get<string>(
+      'JWT_REFRESH_EXPIRES_IN',
+      '7d',
+    );
   }
 
   async validateCredentials(email: string, password: string) {
@@ -68,30 +90,54 @@ export class AuthService {
     return { id: user.id, email: user.email, displayName: user.displayName };
   }
 
-  async register(data: { email: string; password: string; displayName: string }, meta: TokenRequestMeta) {
+  async register(
+    data: { email: string; password: string; displayName: string },
+    meta: TokenRequestMeta,
+  ) {
     const existing = await this.usersService.findByEmail(data.email);
     if (existing) {
-      throw new UnauthorizedException('An account with this email already exists');
+      throw new UnauthorizedException(
+        'An account with this email already exists',
+      );
     }
-    const passwordHash = await argon2.hash(data.password, { type: argon2.argon2id });
+    const passwordHash = await argon2.hash(data.password, {
+      type: argon2.argon2id,
+    });
     const user = await this.usersService.create({
       email: data.email,
       passwordHash,
       displayName: data.displayName,
     });
     const tokens = await this.issueTokenPair(user.id, user.email, meta);
-    return { user: { id: user.id, email: user.email, displayName: user.displayName }, tokens };
+    return {
+      user: { id: user.id, email: user.email, displayName: user.displayName },
+      tokens,
+    };
   }
 
-  async login(user: { id: string; email: string; displayName: string }, meta: TokenRequestMeta) {
+  async login(
+    user: { id: string; email: string; displayName: string },
+    meta: TokenRequestMeta,
+  ) {
     const tokens = await this.issueTokenPair(user.id, user.email, meta);
     return { user, tokens };
   }
 
-  async refresh(userId: string, tokenId: string, meta: TokenRequestMeta): Promise<TokenPair> {
-    const row = await this.prisma.refreshToken.findUnique({ where: { id: tokenId } });
+  async refresh(
+    userId: string,
+    tokenId: string,
+    refreshToken: string,
+    meta: TokenRequestMeta,
+  ): Promise<TokenPair> {
+    const row = await this.prisma.refreshToken.findUnique({
+      where: { id: tokenId },
+    });
 
-    if (!row || row.userId !== userId) {
+    if (
+      !row ||
+      row.userId !== userId ||
+      !tokenHashMatches(refreshToken, row.tokenHash)
+    ) {
       throw new UnauthorizedException('Invalid refresh token');
     }
 
@@ -102,7 +148,9 @@ export class AuthService {
         where: { familyId: row.familyId, revokedAt: null },
         data: { revokedAt: new Date() },
       });
-      throw new UnauthorizedException('Refresh token reuse detected, all sessions revoked');
+      throw new UnauthorizedException(
+        'Refresh token reuse detected, all sessions revoked',
+      );
     }
 
     if (row.expiresAt.getTime() < Date.now()) {
@@ -114,14 +162,37 @@ export class AuthService {
       throw new UnauthorizedException('User no longer active');
     }
 
-    const { tokens, newRowId } = await this.issueTokenPairInternal(user.id, user.email, meta, row.familyId);
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        const { tokens, newRowId } = await this.issueTokenPairInternal(
+          user.id,
+          user.email,
+          meta,
+          row.familyId,
+          tx,
+        );
+        const rotated = await tx.refreshToken.updateMany({
+          where: { id: row.id, revokedAt: null },
+          data: { revokedAt: new Date(), replacedById: newRowId },
+        });
 
-    await this.prisma.refreshToken.update({
-      where: { id: row.id },
-      data: { revokedAt: new Date(), replacedById: newRowId },
-    });
+        if (rotated.count !== 1) {
+          throw new RefreshRotationConflictError();
+        }
 
-    return tokens;
+        return tokens;
+      });
+    } catch (error) {
+      if (!(error instanceof RefreshRotationConflictError)) throw error;
+
+      await this.prisma.refreshToken.updateMany({
+        where: { familyId: row.familyId, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
+      throw new UnauthorizedException(
+        'Refresh token reuse detected, all sessions revoked',
+      );
+    }
   }
 
   async logout(tokenId: string) {
@@ -131,8 +202,17 @@ export class AuthService {
     });
   }
 
-  private async issueTokenPair(userId: string, email: string, meta: TokenRequestMeta): Promise<TokenPair> {
-    const { tokens } = await this.issueTokenPairInternal(userId, email, meta, randomUUID());
+  private async issueTokenPair(
+    userId: string,
+    email: string,
+    meta: TokenRequestMeta,
+  ): Promise<TokenPair> {
+    const { tokens } = await this.issueTokenPairInternal(
+      userId,
+      email,
+      meta,
+      randomUUID(),
+    );
     return tokens;
   }
 
@@ -141,13 +221,25 @@ export class AuthService {
     email: string,
     meta: TokenRequestMeta,
     familyId: string,
+    db: Prisma.TransactionClient | PrismaService = this.prisma,
   ): Promise<{ tokens: TokenPair; newRowId: string }> {
-    const expiresAt = new Date(Date.now() + parseDurationMs(this.refreshExpiresIn));
+    const expiresAt = new Date(
+      Date.now() + parseDurationMs(this.refreshExpiresIn),
+    );
+    const newRowId = randomUUID();
+    const refreshToken = this.jwtService.sign(
+      { sub: userId, jti: newRowId },
+      {
+        secret: this.refreshSecret,
+        expiresIn: asJwtExpiry(this.refreshExpiresIn),
+      },
+    );
 
-    const row = await this.prisma.refreshToken.create({
+    await db.refreshToken.create({
       data: {
+        id: newRowId,
         userId,
-        tokenHash: '',
+        tokenHash: hashToken(refreshToken),
         familyId,
         expiresAt,
         userAgent: meta.userAgent,
@@ -155,22 +247,15 @@ export class AuthService {
       },
     });
 
-    const refreshToken = this.jwtService.sign(
-      { sub: userId, jti: row.id },
-      { secret: this.refreshSecret, expiresIn: asJwtExpiry(this.refreshExpiresIn) },
-    );
-
-    await this.prisma.refreshToken.update({
-      where: { id: row.id },
-      data: { tokenHash: hashToken(refreshToken) },
-    });
-
     const accessToken = this.jwtService.sign(
       { sub: userId, email },
-      { secret: this.accessSecret, expiresIn: asJwtExpiry(this.accessExpiresIn) },
+      {
+        secret: this.accessSecret,
+        expiresIn: asJwtExpiry(this.accessExpiresIn),
+      },
     );
 
-    return { tokens: { accessToken, refreshToken }, newRowId: row.id };
+    return { tokens: { accessToken, refreshToken }, newRowId };
   }
 
   getRefreshCookieMaxAgeMs(): number {
