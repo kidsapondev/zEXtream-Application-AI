@@ -42,6 +42,13 @@ export interface CodeArtifactDto {
   createdAt: string;
 }
 
+export interface ProviderSettingDto {
+  provider: AiProviderKey;
+  requiresApiKey: boolean;
+  configured: boolean;
+  updatedAt: string | null;
+}
+
 // --- WebSocket event contracts ---
 
 export interface ClientToServerEvents {

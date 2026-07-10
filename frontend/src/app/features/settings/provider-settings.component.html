@@ -1,0 +1,62 @@
+<main class="provider-settings">
+  <header>
+    <p class="eyebrow">Settings</p>
+    <h1>AI providers</h1>
+    <p>Keys are encrypted before storage and are never shown again.</p>
+  </header>
+
+  @if (error(); as message) {
+    <p class="error" role="alert">{{ message }}</p>
+  }
+
+  @if (loading()) {
+    <p>Loading providers...</p>
+  } @else {
+    <section class="provider-grid">
+      @for (setting of settings(); track setting.provider) {
+        <article class="provider-card">
+          <div>
+            <h2>{{ setting.provider }}</h2>
+            <p>{{ setting.configured ? 'Configured' : 'Not configured' }}</p>
+          </div>
+
+          @if (setting.requiresApiKey) {
+            <label>
+              API key
+              <input
+                type="password"
+                autocomplete="off"
+                [value]="keyFor(setting.provider)"
+                (input)="setKey(setting.provider, $any($event.target).value)"
+                [disabled]="savingProvider() === setting.provider"
+              />
+            </label>
+            <div class="actions">
+              <button
+                type="button"
+                (click)="save(setting)"
+                [disabled]="
+                  !keyFor(setting.provider).trim() || savingProvider() === setting.provider
+                "
+              >
+                Save key
+              </button>
+              @if (setting.configured) {
+                <button
+                  type="button"
+                  class="danger"
+                  (click)="remove(setting)"
+                  [disabled]="savingProvider() === setting.provider"
+                >
+                  Remove key
+                </button>
+              }
+            </div>
+          } @else {
+            <p class="note">Uses the locally configured Ollama service.</p>
+          }
+        </article>
+      }
+    </section>
+  }
+</main>

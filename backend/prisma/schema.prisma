@@ -25,6 +25,7 @@ model User {
 
   refreshTokens RefreshToken[]
   chatSessions  ChatSession[]
+  providerCredentials ProviderCredential[]
 
   @@map("users")
 }
@@ -142,4 +143,20 @@ model RefreshToken {
   @@index([tokenHash])
   @@index([familyId])
   @@map("refresh_tokens")
+}
+
+model ProviderCredential {
+  id                String     @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  userId            String     @map("user_id") @db.Uuid
+  provider          AiProvider
+  encryptedApiKey   Bytes      @map("encrypted_api_key")
+  encryptionVersion Int        @default(1) @map("encryption_version")
+  createdAt         DateTime   @default(now()) @map("created_at")
+  updatedAt         DateTime   @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, provider])
+  @@index([provider])
+  @@map("provider_credentials")
 }

@@ -380,20 +380,20 @@
 ### งานที่ต้องทำ
 
 - [ ] ออกแบบ provider configuration model ต่อ user
-- [ ] เลือก encryption format สำหรับ API key แบบ authenticated encryption
-- [ ] Validate `API_KEY_ENCRYPTION_KEY` เป็น key length/encoding ที่ถูกต้อง ไม่ใช่เพียง non-empty string
-- [ ] สร้าง service สำหรับ encrypt/decrypt/rotate API keys
-- [ ] ห้ามคืน decrypted key ผ่าน API หรือ log
+- [x] เลือก encryption format สำหรับ API key แบบ authenticated encryption
+- [x] Validate `API_KEY_ENCRYPTION_KEY` เป็น key length/encoding ที่ถูกต้อง ไม่ใช่เพียง non-empty string
+- [x] สร้าง service สำหรับ encrypt/decrypt/rotate API keys
+- [x] ห้ามคืน decrypted key ผ่าน API หรือ log
 - [ ] Implement OpenAI provider
 - [ ] Implement Claude provider
 - [ ] Register providers ใน `AiModule` และ `AiProviderFactory`
 - [ ] เพิ่ม provider capability metadata เช่น models, streaming, max tokens
-- [ ] เพิ่ม `/settings/providers` route และ page
-- [ ] เพิ่ม wizard/modal สำหรับเพิ่ม API key และทดสอบ connection
+- [x] เพิ่ม `/settings/providers` route และ page
+- [~] เพิ่ม wizard/modal สำหรับเพิ่ม API key และทดสอบ connection (มี API key form แล้ว; ยังไม่มี connection test)
 - [ ] เพิ่ม model selector ตอนสร้างหรือแก้ session
 - [ ] จำกัด DTO ให้เลือกเฉพาะ provider ที่ configured และ runtime รองรับ
 - [ ] เพิ่ม endpoint ทดสอบ provider โดยไม่เปิดเผย key
-- [ ] เพิ่ม key update/delete และ revocation flow
+- [x] เพิ่ม key update/delete และ revocation flow
 - [ ] เพิ่ม error mapping ของแต่ละ provider
 - [ ] เพิ่ม tests ด้วย mocked upstream responses
 

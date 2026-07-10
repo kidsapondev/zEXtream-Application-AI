@@ -9,6 +9,7 @@ import { UsersModule } from './users/users.module';
 import { ChatModule } from './chat/chat.module';
 import { RealtimeModule } from './realtime/realtime.module';
 import { ArtifactsModule } from './artifacts/artifacts.module';
+import { ProviderSettingsModule } from './provider-settings/provider-settings.module';
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { ArtifactsModule } from './artifacts/artifacts.module';
     AuthModule,
     ChatModule,
     ArtifactsModule,
+    ProviderSettingsModule,
     RealtimeModule,
   ],
   controllers: [AppController],

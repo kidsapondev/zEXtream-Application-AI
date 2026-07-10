@@ -1,0 +1,67 @@
+.provider-settings {
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 2rem;
+}
+
+.eyebrow {
+  margin: 0;
+  color: var(--color-accent, #86a9ff);
+  font-size: 0.8rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+h1 {
+  margin: 0.25rem 0;
+}
+
+.provider-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 1rem;
+  margin-top: 1.5rem;
+}
+
+.provider-card {
+  display: grid;
+  gap: 0.9rem;
+  padding: 1.25rem;
+  border: 1px solid var(--color-border, #2f3543);
+  border-radius: 0.75rem;
+}
+
+h2,
+p {
+  margin: 0;
+}
+
+label {
+  display: grid;
+  gap: 0.4rem;
+}
+
+input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.6rem;
+}
+
+.actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+button {
+  padding: 0.55rem 0.8rem;
+}
+
+.danger {
+  color: #ff9e9e;
+}
+.error {
+  color: #ff9e9e;
+}
+.note {
+  color: var(--color-muted, #a8afbd);
+}

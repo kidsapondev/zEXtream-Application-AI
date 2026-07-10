@@ -187,4 +187,43 @@ describe('Application security flows (e2e)', () => {
       expect.objectContaining({ id: latest.id, revision: 2, parentArtifactId: first.id }),
     ]);
   });
+
+  it('stores provider credentials encrypted and never returns a plaintext key', async () => {
+    const user = await register('provider-settings');
+
+    await request(app.getHttpServer())
+      .put('/api/settings/providers/openai')
+      .set('Authorization', `Bearer ${user.accessToken}`)
+      .send({ apiKey: 'test-openai-secret' })
+      .expect(200)
+      .expect({ success: true });
+
+    const row = await prisma.providerCredential.findUnique({
+      where: { userId_provider: { userId: user.user.id, provider: 'openai' } },
+    });
+    expect(row).not.toBeNull();
+    expect(Buffer.from(row!.encryptedApiKey).toString('utf8')).not.toContain('test-openai-secret');
+
+    const settings = await request(app.getHttpServer())
+      .get('/api/settings/providers')
+      .set('Authorization', `Bearer ${user.accessToken}`)
+      .expect(200);
+    expect(settings.body).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ provider: 'openai', configured: true }),
+      ]),
+    );
+    expect(JSON.stringify(settings.body)).not.toContain('test-openai-secret');
+
+    await request(app.getHttpServer())
+      .delete('/api/settings/providers/openai')
+      .set('Authorization', `Bearer ${user.accessToken}`)
+      .expect(200)
+      .expect({ success: true });
+    await expect(
+      prisma.providerCredential.findUnique({
+        where: { userId_provider: { userId: user.user.id, provider: 'openai' } },
+      }),
+    ).resolves.toBeNull();
+  });
 });
