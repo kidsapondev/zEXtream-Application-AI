@@ -1,4 +1,8 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { Prisma } from '@prisma/client';
@@ -49,6 +53,20 @@ function tokenHashMatches(token: string, storedHash: string): boolean {
   return actual.length === expected.length && timingSafeEqual(actual, expected);
 }
 
+// Used to keep validateCredentials' response time equivalent whether or not the
+// account exists — without this, skipping argon2.verify for unknown emails would
+// make login measurably faster for non-existent accounts, letting an attacker
+// enumerate valid emails via response timing alone. Computed lazily once (argon2.hash
+// is async) and cached, so every call after the first just reuses the resolved hash.
+const DUMMY_PASSWORD = 'zextream-timing-safety-placeholder';
+let dummyPasswordHash: Promise<string> | null = null;
+function getDummyPasswordHash(): Promise<string> {
+  if (!dummyPasswordHash) {
+    dummyPasswordHash = argon2.hash(DUMMY_PASSWORD, { type: argon2.argon2id });
+  }
+  return dummyPasswordHash;
+}
+
 class RefreshRotationConflictError extends Error {}
 
 @Injectable()
@@ -80,11 +98,12 @@ export class AuthService {
 
   async validateCredentials(email: string, password: string) {
     const user = await this.usersService.findByEmail(email);
-    if (!user || !user.isActive) {
-      return null;
-    }
-    const valid = await argon2.verify(user.passwordHash, password);
-    if (!valid) {
+    const isAccountUsable = !!user && user.isActive;
+    const passwordHash = isAccountUsable
+      ? user.passwordHash
+      : await getDummyPasswordHash();
+    const valid = await argon2.verify(passwordHash, password);
+    if (!isAccountUsable || !valid) {
       return null;
     }
     return { id: user.id, email: user.email, displayName: user.displayName };
@@ -96,9 +115,7 @@ export class AuthService {
   ) {
     const existing = await this.usersService.findByEmail(data.email);
     if (existing) {
-      throw new UnauthorizedException(
-        'An account with this email already exists',
-      );
+      throw new ConflictException('An account with this email already exists');
     }
     const passwordHash = await argon2.hash(data.password, {
       type: argon2.argon2id,

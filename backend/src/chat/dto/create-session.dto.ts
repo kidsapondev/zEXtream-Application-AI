@@ -1,6 +1,6 @@
 import { IsIn, IsOptional, IsString, MaxLength } from 'class-validator';
 
-const ENABLED_PROVIDERS = ['ollama'] as const;
+export const ENABLED_PROVIDERS = ['ollama'] as const;
 
 export class CreateSessionDto {
   @IsOptional()

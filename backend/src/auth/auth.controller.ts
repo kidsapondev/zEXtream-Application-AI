@@ -8,6 +8,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { Throttle } from '@nestjs/throttler';
 import type { Request, Response } from 'express';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
@@ -21,6 +22,18 @@ const REFRESH_COOKIE_NAME = 'refresh_token';
 // cookie to know which refresh-token row to revoke, and cookie path matching only
 // covers exact/prefix matches, so a narrower scope would silently exclude it.
 const REFRESH_COOKIE_PATH = '/api/auth';
+
+// These endpoints are @Public() (no JWT required), so the global ThrottlerGuard's
+// default limit (100 req/min, see app.module.ts) is the only thing standing between
+// them and brute-force/credential-stuffing/mass-registration abuse — tighten per-route.
+const LOGIN_THROTTLE = { default: { limit: 5, ttl: 60_000 } };
+const REGISTER_THROTTLE = { default: { limit: 3, ttl: 60_000 } };
+// Higher than login/register: the SPA can fire a refresh call from every open tab the
+// moment the access token expires (see frontend auth.store.ts/auth.interceptor.ts —
+// each tab dedupes its own concurrent calls but tabs don't coordinate with each other),
+// and all tabs share the same refresh cookie/IP. 20/min comfortably covers a handful of
+// tabs refreshing in the same burst without opening the door to brute-forcing tokens.
+const REFRESH_THROTTLE = { default: { limit: 20, ttl: 60_000 } };
 
 @Controller('auth')
 export class AuthController {
@@ -55,6 +68,7 @@ export class AuthController {
   }
 
   @Public()
+  @Throttle(REGISTER_THROTTLE)
   @Post('register')
   async register(
     @Body() dto: RegisterDto,
@@ -70,6 +84,7 @@ export class AuthController {
   }
 
   @Public()
+  @Throttle(LOGIN_THROTTLE)
   @UseGuards(LocalAuthGuard)
   @Post('login')
   async login(
@@ -87,6 +102,7 @@ export class AuthController {
   }
 
   @Public()
+  @Throttle(REFRESH_THROTTLE)
   @UseGuards(JwtRefreshGuard)
   @Post('refresh')
   async refresh(

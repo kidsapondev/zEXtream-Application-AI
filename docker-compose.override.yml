@@ -20,6 +20,9 @@ services:
       - ./backend/prisma:/app/backend/prisma
     environment:
       CHOKIDAR_USEPOLLING: 'true'
+      # Dev backend is reachable directly on :3000 (no nginx in front), so never trust
+      # proxy headers here even if TRUST_PROXY=1 is set in .env for the prod stack.
+      TRUST_PROXY: '0'
 
   frontend:
     build:

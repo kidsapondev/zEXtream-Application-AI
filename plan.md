@@ -152,10 +152,10 @@
   - สร้าง token ใหม่และ revoke token เดิมใน transaction เดียว
   - ป้องกันหลาย browser tabs refresh token เดียวกันพร้อมกันแล้วได้ token ใหม่หลายใบ
 - [x] ตรวจ `tokenHash` กับ refresh token ที่ได้รับจริง หรือถ้าไม่ใช้ให้ทบทวน design และลบ field ที่ทำให้เข้าใจผิด
-- [ ] เปลี่ยน duplicate-email response จาก `UnauthorizedException` เป็น `ConflictException`
-- [ ] ป้องกัน account enumeration ด้วยข้อความและ timing ที่เหมาะสม
-- [ ] เพิ่ม rate limiting ให้ register, login และ refresh
-- [ ] ตรวจ trusted proxy/IP handling ก่อนบันทึก `req.ip` ใน production
+- [x] เปลี่ยน duplicate-email response จาก `UnauthorizedException` เป็น `ConflictException`
+- [x] ป้องกัน account enumeration ด้วยข้อความและ timing ที่เหมาะสม
+- [x] เพิ่ม rate limiting ให้ register, login และ refresh
+- [x] ตรวจ trusted proxy/IP handling ก่อนบันทึก `req.ip` ใน production
 
 ### P1 — Tests ที่ต้องเพิ่ม
 
@@ -243,9 +243,9 @@
 - [x] Disconnect socket ตอน logout
 - [x] Reconnect/re-authenticate socket เมื่อ login เป็น user ใหม่
 - [x] ออกแบบการ refresh token สำหรับ socket reconnect เมื่อ access token หมดอายุ
-- [ ] ตรวจว่า global REST auth guard ไม่รบกวน WebSocket handlers และเพิ่ม gateway-specific guard/test ให้ชัดเจน
-- [ ] Validate WebSocket payloads แทนการเชื่อ type จาก client
-- [ ] จำกัดขนาด `content`, `model`, filename และ artifact content
+- [x] ตรวจว่า global REST auth guard ไม่รบกวน WebSocket handlers และเพิ่ม gateway-specific guard/test ให้ชัดเจน
+- [x] Validate WebSocket payloads แทนการเชื่อ type จาก client
+- [x] จำกัดขนาด `content`, `model`, filename และ artifact content
 
 ### P1 — Streaming correctness
 

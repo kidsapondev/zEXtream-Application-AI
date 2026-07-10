@@ -7,7 +7,7 @@ import {
   WebSocketServer,
   WsException,
 } from '@nestjs/websockets';
-import { Logger } from '@nestjs/common';
+import { Logger, UseFilters, UsePipes, ValidationPipe } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'crypto';
@@ -16,13 +16,19 @@ import { ChatSessionsService } from '../chat/chat-sessions.service';
 import { MessagesService } from '../chat/messages.service';
 import { AiProviderFactory } from '../ai/ai-provider.factory';
 import { ActiveStreamRegistry } from './active-stream-registry.service';
-import { AiMessage, AiProviderKey } from '../ai/ai-provider.interface';
+import { AiMessage } from '../ai/ai-provider.interface';
 import { ArtifactStreamParser } from '../ai/artifact-stream-parser';
 import {
   ArtifactsService,
   assertArtifactContentBytes,
   normalizeArtifactFilename,
 } from '../artifacts/artifacts.service';
+import { SessionJoinDto } from './dto/session-join.dto';
+import { SessionLeaveDto } from './dto/session-leave.dto';
+import { ChatStopDto } from './dto/chat-stop.dto';
+import { ArtifactEditDto } from './dto/artifact-edit.dto';
+import { ChatSendDto } from './dto/chat-send.dto';
+import { WsValidationFilter } from './ws-validation.filter';
 
 interface AccessTokenPayload {
   sub: string;
@@ -52,6 +58,18 @@ function artifactContextMessage(
   path: '/ws/socket.io',
   cors: { origin: process.env.CORS_ORIGIN, credentials: true },
 })
+// Global pipes/filters from main.ts do not reach WS handlers (see
+// ws-validation.filter.ts for why), so both must be declared explicitly here
+// to match the REST-side ValidationPipe options and give validation failures
+// a client-visible error shape instead of an unhandled/unknown exception.
+@UsePipes(
+  new ValidationPipe({
+    whitelist: true,
+    forbidNonWhitelisted: true,
+    transform: true,
+  }),
+)
+@UseFilters(WsValidationFilter)
 export class ChatGateway implements OnGatewayConnection {
   @WebSocketServer()
   server!: Server;
@@ -87,7 +105,7 @@ export class ChatGateway implements OnGatewayConnection {
   @SubscribeMessage('session:join')
   async onSessionJoin(
     @ConnectedSocket() client: Socket,
-    @MessageBody() body: { sessionId: string },
+    @MessageBody() body: SessionJoinDto,
   ) {
     await this.sessionsService.getOwned(this.userId(client), body.sessionId);
     await client.join(this.roomName(body.sessionId));
@@ -96,7 +114,7 @@ export class ChatGateway implements OnGatewayConnection {
   @SubscribeMessage('session:leave')
   async onSessionLeave(
     @ConnectedSocket() client: Socket,
-    @MessageBody() body: { sessionId: string },
+    @MessageBody() body: SessionLeaveDto,
   ) {
     await client.leave(this.roomName(body.sessionId));
   }
@@ -104,7 +122,7 @@ export class ChatGateway implements OnGatewayConnection {
   @SubscribeMessage('chat:stop')
   async onChatStop(
     @ConnectedSocket() client: Socket,
-    @MessageBody() body: { messageId: string },
+    @MessageBody() body: ChatStopDto,
   ) {
     const isOwner = await this.messagesService.isOwnedByUser(
       body.messageId,
@@ -117,7 +135,7 @@ export class ChatGateway implements OnGatewayConnection {
   @SubscribeMessage('artifact:edit')
   async onArtifactEdit(
     @ConnectedSocket() client: Socket,
-    @MessageBody() body: { artifactId: string; content: string },
+    @MessageBody() body: ArtifactEditDto,
   ) {
     const existing = await this.artifactsService.getById(body.artifactId);
     if (!existing) return;
@@ -142,13 +160,7 @@ export class ChatGateway implements OnGatewayConnection {
   @SubscribeMessage('chat:send')
   async onChatSend(
     @ConnectedSocket() client: Socket,
-    @MessageBody()
-    body: {
-      sessionId: string;
-      content: string;
-      provider?: AiProviderKey;
-      model?: string;
-    },
+    @MessageBody() body: ChatSendDto,
   ) {
     const userId = this.userId(client);
     const session = await this.sessionsService.getOwned(userId, body.sessionId);

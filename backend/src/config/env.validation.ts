@@ -28,6 +28,10 @@ export const envSchema = z.object({
     ),
   OLLAMA_BASE_URL: z.string().url(),
   CORS_ORIGIN: z.string().optional(),
+  // Number of trusted reverse-proxy hops in front of the app (Express `trust proxy`
+  // semantics). 0 = trust nothing, use the raw socket address — the safe default for
+  // bare/dev runs where a client could otherwise spoof X-Forwarded-For themselves.
+  TRUST_PROXY: z.coerce.number().int().nonnegative().default(0),
 });
 
 export type EnvConfig = z.infer<typeof envSchema>;

@@ -1,7 +1,38 @@
 import { Socket } from 'socket.io';
 import { WsException } from '@nestjs/websockets';
+import { BadRequestException, ValidationPipe } from '@nestjs/common';
 import { ChatGateway } from './chat.gateway';
 import { MAX_ARTIFACT_CONTENT_BYTES } from '../artifacts/artifacts.service';
+import { MAX_CHAT_MESSAGE_BYTES } from '../chat/messages.service';
+import { ChatSendDto } from './dto/chat-send.dto';
+import { ArtifactEditDto } from './dto/artifact-edit.dto';
+import { SessionJoinDto } from './dto/session-join.dto';
+
+const VALID_SESSION_ID = '11111111-1111-4111-8111-111111111111';
+
+/**
+ * Runs a raw payload through the exact ValidationPipe configuration applied
+ * to ChatGateway via @UsePipes (see chat.gateway.ts). Unit tests below call
+ * gateway handlers directly and therefore bypass Nest's runtime pipe/guard
+ * wiring entirely, so this is the only way to exercise the real DTO
+ * validation behavior without standing up a full Nest application + socket
+ * connection.
+ */
+function validateMessageBody<T extends object>(
+  metatype: new () => T,
+  raw: object,
+): Promise<T> {
+  const pipe = new ValidationPipe({
+    whitelist: true,
+    forbidNonWhitelisted: true,
+    transform: true,
+  });
+  return pipe.transform(raw, {
+    type: 'body',
+    metatype,
+    data: '',
+  }) as Promise<T>;
+}
 
 describe('ChatGateway chat:stop', () => {
   const messagesService = {
@@ -228,5 +259,175 @@ describe('ChatGateway chat:send failure handling', () => {
       'stopped',
       undefined,
     );
+  });
+
+  it('rejects an oversized content payload before any service is called', async () => {
+    await expect(
+      validateMessageBody(ChatSendDto, {
+        sessionId: VALID_SESSION_ID,
+        content: 'a'.repeat(MAX_CHAT_MESSAGE_BYTES + 1),
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(sessionsService.getOwned).not.toHaveBeenCalled();
+    expect(messagesService.createUserMessage).not.toHaveBeenCalled();
+    expect(aiProviderFactory.hasProvider).not.toHaveBeenCalled();
+  });
+
+  it('rejects a provider that is not in the enabled allowlist before any service is called', async () => {
+    await expect(
+      validateMessageBody(ChatSendDto, {
+        sessionId: VALID_SESSION_ID,
+        content: 'hello',
+        provider: 'claude',
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(sessionsService.getOwned).not.toHaveBeenCalled();
+    expect(messagesService.createUserMessage).not.toHaveBeenCalled();
+  });
+
+  it('rejects a missing sessionId before any service is called', async () => {
+    await expect(
+      validateMessageBody(ChatSendDto, { content: 'hello' }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(sessionsService.getOwned).not.toHaveBeenCalled();
+  });
+});
+
+describe('ChatGateway message payload validation (DTOs)', () => {
+  it('accepts a well-formed chat:send payload and transforms it into a ChatSendDto', async () => {
+    const dto = await validateMessageBody(ChatSendDto, {
+      sessionId: VALID_SESSION_ID,
+      content: 'hello there',
+    });
+
+    expect(dto).toBeInstanceOf(ChatSendDto);
+    expect(dto.sessionId).toBe(VALID_SESSION_ID);
+  });
+
+  it('rejects a non-UUID sessionId', async () => {
+    await expect(
+      validateMessageBody(ChatSendDto, {
+        sessionId: 'not-a-uuid',
+        content: 'hello',
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('rejects unknown extra fields on the payload', async () => {
+    await expect(
+      validateMessageBody(ChatSendDto, {
+        sessionId: VALID_SESSION_ID,
+        content: 'hello',
+        isAdmin: true,
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('rejects a model longer than 200 characters', async () => {
+    await expect(
+      validateMessageBody(ChatSendDto, {
+        sessionId: VALID_SESSION_ID,
+        content: 'hello',
+        model: 'x'.repeat(201),
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('rejects artifact:edit content larger than MAX_ARTIFACT_CONTENT_BYTES', async () => {
+    await expect(
+      validateMessageBody(ArtifactEditDto, {
+        artifactId: VALID_SESSION_ID,
+        content: 'a'.repeat(MAX_ARTIFACT_CONTENT_BYTES + 1),
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('accepts artifact:edit content within MAX_ARTIFACT_CONTENT_BYTES', async () => {
+    const dto = await validateMessageBody(ArtifactEditDto, {
+      artifactId: VALID_SESSION_ID,
+      content: 'export const ok = true;',
+    });
+
+    expect(dto).toBeInstanceOf(ArtifactEditDto);
+  });
+
+  it('rejects session:join without a sessionId', async () => {
+    await expect(
+      validateMessageBody(SessionJoinDto, {}),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+});
+
+describe('ChatGateway auth is enforced by the gateway itself, independent of the global HTTP guard', () => {
+  // Verified against this Nest version (11.1.28), not assumed: @nestjs/websockets'
+  // SocketModule builds its GuardsContextCreator/PipesContextCreator with only the
+  // module container, never the app's ApplicationConfig (see
+  // node_modules/@nestjs/websockets/socket-module.js#getContextCreator). Both
+  // context creators' getGlobalMetadata() short-circuits to [] whenever `config`
+  // is undefined, so global providers registered via APP_GUARD/useGlobalPipes in
+  // main.ts/auth.module.ts (JwtAuthGuard, ThrottlerGuard, the REST ValidationPipe)
+  // are never part of the guards/pipes array @SubscribeMessage handlers run
+  // through. ChatGateway's auth is therefore entirely self-contained: manual JWT
+  // verification in handleConnection() plus each handler calling this.userId(),
+  // which throws WsException when client.data.userId was never set. These tests
+  // pin that self-contained behavior directly.
+  const sessionsService = { getOwned: jest.fn(), touch: jest.fn() };
+  const messagesService = { isOwnedByUser: jest.fn() };
+  const streamRegistry = { stop: jest.fn() };
+  const artifactsService = { getById: jest.fn() };
+
+  const gateway = new ChatGateway(
+    {} as never,
+    {} as never,
+    sessionsService as never,
+    messagesService as never,
+    {} as never,
+    streamRegistry as never,
+    artifactsService as never,
+  );
+
+  const unauthenticatedClient = { data: {} } as unknown as Socket;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it('onSessionJoin throws WsException and never calls sessionsService for an unauthenticated socket', async () => {
+    await expect(
+      gateway.onSessionJoin(unauthenticatedClient, {
+        sessionId: VALID_SESSION_ID,
+      }),
+    ).rejects.toBeInstanceOf(WsException);
+
+    expect(sessionsService.getOwned).not.toHaveBeenCalled();
+  });
+
+  it('onChatStop throws WsException and never calls messagesService for an unauthenticated socket', async () => {
+    await expect(
+      gateway.onChatStop(unauthenticatedClient, {
+        messageId: VALID_SESSION_ID,
+      }),
+    ).rejects.toBeInstanceOf(WsException);
+
+    expect(messagesService.isOwnedByUser).not.toHaveBeenCalled();
+  });
+
+  it('onArtifactEdit throws WsException and never calls sessionsService for an unauthenticated socket', async () => {
+    artifactsService.getById.mockResolvedValue({
+      id: VALID_SESSION_ID,
+      sessionId: VALID_SESSION_ID,
+    });
+
+    await expect(
+      gateway.onArtifactEdit(unauthenticatedClient, {
+        artifactId: VALID_SESSION_ID,
+        content: 'x',
+      }),
+    ).rejects.toBeInstanceOf(WsException);
+
+    expect(sessionsService.getOwned).not.toHaveBeenCalled();
   });
 });

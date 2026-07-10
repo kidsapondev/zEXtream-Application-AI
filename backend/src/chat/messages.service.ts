@@ -2,6 +2,14 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AiProviderKey } from '../ai/ai-provider.interface';
 
+/**
+ * Maximum UTF-8 size of a single user-authored chat message (32 KiB). A chat
+ * prompt is text a person typed or pasted, not a file — this is intentionally
+ * much smaller than MAX_ARTIFACT_CONTENT_BYTES (1 MiB), which bounds generated
+ * or edited file content instead.
+ */
+export const MAX_CHAT_MESSAGE_BYTES = 32 * 1024;
+
 @Injectable()
 export class MessagesService {
   constructor(private readonly prisma: PrismaService) {}
