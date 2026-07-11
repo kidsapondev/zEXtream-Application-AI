@@ -5,6 +5,8 @@ import {
   AiProvider,
   AiStreamEvent,
 } from '../ai-provider.interface';
+import { CircuitBreakerService } from '../circuit-breaker.service';
+import { fetchWithRetry } from './fetch-with-retry';
 
 const CLAUDE_MESSAGES_URL = 'https://api.anthropic.com/v1/messages';
 const CLAUDE_API_VERSION = '2023-06-01';
@@ -57,9 +59,22 @@ async function mapUpstreamError(response: Response): Promise<string> {
 export class ClaudeProvider implements AiProvider {
   readonly key = 'claude' as const;
 
+  constructor(private readonly circuitBreaker: CircuitBreakerService) {}
+
   async *streamChat(request: AiChatRequest): AsyncIterable<AiStreamEvent> {
     if (!request.apiKey) {
       yield { type: 'error', message: 'No Claude API key configured' };
+      return;
+    }
+
+    if (this.circuitBreaker.isOpen(this.key)) {
+      const retryInSeconds = Math.ceil(
+        this.circuitBreaker.cooldownRemainingMs(this.key) / 1000,
+      );
+      yield {
+        type: 'error',
+        message: `Claude is temporarily unavailable after repeated failures; retrying in ~${retryInSeconds}s`,
+      };
       return;
     }
 
@@ -67,28 +82,33 @@ export class ClaudeProvider implements AiProvider {
 
     let response: Response;
     try {
-      response = await fetch(CLAUDE_MESSAGES_URL, {
-        method: 'POST',
-        headers: {
-          'x-api-key': request.apiKey,
-          'anthropic-version': CLAUDE_API_VERSION,
-          'content-type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: request.model,
-          max_tokens: request.maxTokens ?? DEFAULT_MAX_TOKENS,
-          messages: turns,
-          ...(system ? { system } : {}),
-          stream: true,
-          temperature: request.temperature,
-        }),
-        signal: request.abortSignal,
-      });
+      response = await fetchWithRetry(
+        () =>
+          fetch(CLAUDE_MESSAGES_URL, {
+            method: 'POST',
+            headers: {
+              'x-api-key': request.apiKey!,
+              'anthropic-version': CLAUDE_API_VERSION,
+              'content-type': 'application/json',
+            },
+            body: JSON.stringify({
+              model: request.model,
+              max_tokens: request.maxTokens ?? DEFAULT_MAX_TOKENS,
+              messages: turns,
+              ...(system ? { system } : {}),
+              stream: true,
+              temperature: request.temperature,
+            }),
+            signal: request.abortSignal,
+          }),
+        request.abortSignal,
+      );
     } catch (err) {
       if (request.abortSignal.aborted) {
         yield { type: 'done', finishReason: 'stopped' };
         return;
       }
+      this.circuitBreaker.recordFailure(this.key);
       yield {
         type: 'error',
         message: `Could not reach Claude: ${(err as Error).message}`,
@@ -97,9 +117,14 @@ export class ClaudeProvider implements AiProvider {
     }
 
     if (!response.ok || !response.body) {
+      if (response.status >= 500) {
+        this.circuitBreaker.recordFailure(this.key);
+      }
       yield { type: 'error', message: await mapUpstreamError(response) };
       return;
     }
+
+    this.circuitBreaker.recordSuccess(this.key);
 
     const reader = response.body.getReader();
     const decoder = new TextDecoder();

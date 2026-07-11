@@ -1,5 +1,9 @@
 import { OpenAiProvider } from './openai.provider';
 import { AiStreamEvent } from '../ai-provider.interface';
+import {
+  CircuitBreakerService,
+  CIRCUIT_BREAKER_FAILURE_THRESHOLD,
+} from '../circuit-breaker.service';
 
 const encode = (text: string) => new TextEncoder().encode(text);
 
@@ -25,7 +29,7 @@ describe('OpenAiProvider', () => {
   });
 
   it('yields an error immediately when no API key is configured, without calling fetch', async () => {
-    const provider = new OpenAiProvider();
+    const provider = new OpenAiProvider(new CircuitBreakerService());
     global.fetch = jest.fn() as never;
 
     const events = await collect(
@@ -66,7 +70,7 @@ describe('OpenAiProvider', () => {
       body: { getReader: () => createReader(readImpl) },
     }) as never;
 
-    const provider = new OpenAiProvider();
+    const provider = new OpenAiProvider(new CircuitBreakerService());
     const events = await collect(
       provider.streamChat({
         messages: [{ role: 'user', content: 'hi' }],
@@ -104,7 +108,7 @@ describe('OpenAiProvider', () => {
       body: { getReader: () => createReader(readImpl) },
     }) as never;
 
-    const provider = new OpenAiProvider();
+    const provider = new OpenAiProvider(new CircuitBreakerService());
     const events = await collect(
       provider.streamChat({
         messages: [{ role: 'user', content: 'hi' }],
@@ -129,7 +133,7 @@ describe('OpenAiProvider', () => {
         Promise.resolve({ error: { message: 'Incorrect API key provided' } }),
     }) as never;
 
-    const provider = new OpenAiProvider();
+    const provider = new OpenAiProvider(new CircuitBreakerService());
     const events = await collect(
       provider.streamChat({
         messages: [{ role: 'user', content: 'hi' }],
@@ -144,38 +148,121 @@ describe('OpenAiProvider', () => {
     ]);
   });
 
-  it('maps a 429 response to a rate-limited error', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
-      ok: false,
-      status: 429,
-      body: {},
-      json: () => Promise.resolve({}),
-    }) as never;
+  it('maps a 429 response to a rate-limited error (after exhausting retries)', async () => {
+    jest.useFakeTimers();
+    try {
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: false,
+        status: 429,
+        body: {},
+        json: () => Promise.resolve({}),
+      }) as never;
 
-    const provider = new OpenAiProvider();
-    const events = await collect(
-      provider.streamChat({
-        messages: [{ role: 'user', content: 'hi' }],
-        model: 'gpt-5.1',
-        apiKey: 'sk-test',
-        abortSignal: new AbortController().signal,
-      }),
-    );
+      const provider = new OpenAiProvider(new CircuitBreakerService());
+      const promise = collect(
+        provider.streamChat({
+          messages: [{ role: 'user', content: 'hi' }],
+          model: 'gpt-5.1',
+          apiKey: 'sk-test',
+          abortSignal: new AbortController().signal,
+        }),
+      );
+      await jest.runAllTimersAsync();
+      const events = await promise;
 
-    expect(events).toEqual([
-      { type: 'error', message: 'Rate limited by OpenAI' },
-    ]);
+      expect(events).toEqual([
+        { type: 'error', message: 'Rate limited by OpenAI' },
+      ]);
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
-  it('maps a 5xx response to a temporarily-unavailable error', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
-      ok: false,
-      status: 503,
-      body: {},
-      json: () => Promise.reject(new Error('no body')),
-    }) as never;
+  it('maps a 5xx response to a temporarily-unavailable error (after exhausting retries)', async () => {
+    jest.useFakeTimers();
+    try {
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: false,
+        status: 503,
+        body: {},
+        json: () => Promise.reject(new Error('no body')),
+      }) as never;
 
-    const provider = new OpenAiProvider();
+      const provider = new OpenAiProvider(new CircuitBreakerService());
+      const promise = collect(
+        provider.streamChat({
+          messages: [{ role: 'user', content: 'hi' }],
+          model: 'gpt-5.1',
+          apiKey: 'sk-test',
+          abortSignal: new AbortController().signal,
+        }),
+      );
+      await jest.runAllTimersAsync();
+      const events = await promise;
+
+      expect(events).toEqual([
+        { type: 'error', message: 'OpenAI is temporarily unavailable' },
+      ]);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('retries a transient failure and succeeds without surfacing an error', async () => {
+    jest.useFakeTimers();
+    try {
+      const readImpl = jest.fn().mockResolvedValueOnce({
+        done: false,
+        value: encode(
+          'data: {"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}\n\n' +
+            'data: [DONE]\n\n',
+        ),
+      });
+      const fetchMock = jest
+        .fn()
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 503,
+          body: {},
+          json: () => Promise.resolve({}),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          body: { getReader: () => createReader(readImpl) },
+        });
+      global.fetch = fetchMock as never;
+
+      const provider = new OpenAiProvider(new CircuitBreakerService());
+      const promise = collect(
+        provider.streamChat({
+          messages: [{ role: 'user', content: 'hi' }],
+          model: 'gpt-5.1',
+          apiKey: 'sk-test',
+          abortSignal: new AbortController().signal,
+        }),
+      );
+      await jest.runAllTimersAsync();
+      const events = await promise;
+
+      expect(events).toEqual([
+        { type: 'token', delta: 'ok' },
+        { type: 'done', finishReason: 'stop' },
+      ]);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('fails fast without calling fetch once the circuit is open', async () => {
+    const circuitBreaker = new CircuitBreakerService();
+    for (let i = 0; i < CIRCUIT_BREAKER_FAILURE_THRESHOLD; i += 1) {
+      circuitBreaker.recordFailure('openai');
+    }
+    global.fetch = jest.fn() as never;
+
+    const provider = new OpenAiProvider(circuitBreaker);
     const events = await collect(
       provider.streamChat({
         messages: [{ role: 'user', content: 'hi' }],
@@ -185,9 +272,33 @@ describe('OpenAiProvider', () => {
       }),
     );
 
-    expect(events).toEqual([
-      { type: 'error', message: 'OpenAI is temporarily unavailable' },
-    ]);
+    expect(events).toHaveLength(1);
+    expect(events[0].type).toBe('error');
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it('repeated 401s (a bad key) never open the circuit for other users', async () => {
+    const circuitBreaker = new CircuitBreakerService();
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: false,
+      status: 401,
+      body: {},
+      json: () => Promise.resolve({ error: { message: 'bad key' } }),
+    }) as never;
+
+    for (let i = 0; i < CIRCUIT_BREAKER_FAILURE_THRESHOLD + 2; i += 1) {
+      const provider = new OpenAiProvider(circuitBreaker);
+      await collect(
+        provider.streamChat({
+          messages: [{ role: 'user', content: 'hi' }],
+          model: 'gpt-5.1',
+          apiKey: 'sk-bad',
+          abortSignal: new AbortController().signal,
+        }),
+      );
+    }
+
+    expect(circuitBreaker.isOpen('openai')).toBe(false);
   });
 
   it('yields a stopped-done event when the caller aborts mid-stream', async () => {
@@ -209,7 +320,7 @@ describe('OpenAiProvider', () => {
       body: { getReader: () => createReader(readImpl) },
     }) as never;
 
-    const provider = new OpenAiProvider();
+    const provider = new OpenAiProvider(new CircuitBreakerService());
     const iterator = provider
       .streamChat({
         messages: [{ role: 'user', content: 'hi' }],

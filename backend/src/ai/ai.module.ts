@@ -3,6 +3,7 @@ import { OllamaProvider } from './providers/ollama.provider';
 import { ClaudeProvider } from './providers/claude.provider';
 import { OpenAiProvider } from './providers/openai.provider';
 import { AiProviderFactory } from './ai-provider.factory';
+import { CircuitBreakerService } from './circuit-breaker.service';
 
 @Module({
   providers: [
@@ -10,6 +11,7 @@ import { AiProviderFactory } from './ai-provider.factory';
     ClaudeProvider,
     OpenAiProvider,
     AiProviderFactory,
+    CircuitBreakerService,
   ],
   exports: [AiProviderFactory],
 })

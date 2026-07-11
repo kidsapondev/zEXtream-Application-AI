@@ -5,14 +5,23 @@ import {
   OllamaProvider,
 } from './ollama.provider';
 import { AiStreamEvent } from '../ai-provider.interface';
+import {
+  CircuitBreakerService,
+  CIRCUIT_BREAKER_FAILURE_THRESHOLD,
+} from '../circuit-breaker.service';
 
 const encode = (text: string) => new TextEncoder().encode(text);
 
-function createProvider(): OllamaProvider {
+function createProvider(
+  circuitBreaker: CircuitBreakerService = new CircuitBreakerService(),
+): OllamaProvider {
   const configService = {
     getOrThrow: jest.fn().mockReturnValue('http://ollama.local'),
   };
-  return new OllamaProvider(configService as unknown as ConfigService);
+  return new OllamaProvider(
+    configService as unknown as ConfigService,
+    circuitBreaker,
+  );
 }
 
 function createReader(readImpl: jest.Mock) {
@@ -110,7 +119,8 @@ describe('OllamaProvider', () => {
     ]);
   });
 
-  it('yields an error event for an upstream HTTP error response', async () => {
+  it('yields an error event for an upstream HTTP error response (after exhausting retries)', async () => {
+    jest.useFakeTimers();
     global.fetch = jest.fn().mockResolvedValue({
       ok: false,
       status: 503,
@@ -118,32 +128,37 @@ describe('OllamaProvider', () => {
     }) as never;
 
     const provider = createProvider();
-    const events = await collect(
+    const promise = collect(
       provider.streamChat({
         messages: [],
         model: 'llama3',
         abortSignal: new AbortController().signal,
       }),
     );
+    await jest.runAllTimersAsync();
+    const events = await promise;
 
     expect(events).toEqual([
       { type: 'error', message: 'Ollama returned HTTP 503' },
     ]);
   });
 
-  it('yields an error event when the connection cannot be established', async () => {
+  it('yields an error event when the connection cannot be established (after exhausting retries)', async () => {
+    jest.useFakeTimers();
     global.fetch = jest
       .fn()
       .mockRejectedValue(new Error('connect ECONNREFUSED')) as never;
 
     const provider = createProvider();
-    const events = await collect(
+    const promise = collect(
       provider.streamChat({
         messages: [],
         model: 'llama3',
         abortSignal: new AbortController().signal,
       }),
     );
+    await jest.runAllTimersAsync();
+    const events = await promise;
 
     expect(events).toEqual([
       {
@@ -151,6 +166,63 @@ describe('OllamaProvider', () => {
         message: 'Could not reach Ollama: connect ECONNREFUSED',
       },
     ]);
+  });
+
+  it('retries a transient failure and succeeds without surfacing an error', async () => {
+    jest.useFakeTimers();
+    const readImpl = jest.fn().mockResolvedValueOnce({
+      done: false,
+      value: encode(
+        '{"message":{"content":"ok"},"done":true,"done_reason":"stop"}\n',
+      ),
+    });
+    const fetchMock = jest
+      .fn()
+      .mockResolvedValueOnce({ ok: false, status: 503, body: null })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        body: { getReader: () => createReader(readImpl) },
+      });
+    global.fetch = fetchMock as never;
+
+    const provider = createProvider();
+    const promise = collect(
+      provider.streamChat({
+        messages: [],
+        model: 'llama3',
+        abortSignal: new AbortController().signal,
+      }),
+    );
+    await jest.runAllTimersAsync();
+    const events = await promise;
+
+    expect(events).toEqual([
+      { type: 'token', delta: 'ok' },
+      { type: 'done', finishReason: 'stop' },
+    ]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('fails fast without calling fetch once the circuit is open', async () => {
+    const circuitBreaker = new CircuitBreakerService();
+    for (let i = 0; i < CIRCUIT_BREAKER_FAILURE_THRESHOLD; i += 1) {
+      circuitBreaker.recordFailure('ollama');
+    }
+    global.fetch = jest.fn() as never;
+
+    const provider = createProvider(circuitBreaker);
+    const events = await collect(
+      provider.streamChat({
+        messages: [],
+        model: 'llama3',
+        abortSignal: new AbortController().signal,
+      }),
+    );
+
+    expect(events).toHaveLength(1);
+    expect(events[0].type).toBe('error');
+    expect(global.fetch).not.toHaveBeenCalled();
   });
 
   it('yields a stopped-done event when the caller aborts mid-stream', async () => {

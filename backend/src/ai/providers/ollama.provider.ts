@@ -5,6 +5,8 @@ import {
   AiProvider,
   AiStreamEvent,
 } from '../ai-provider.interface';
+import { CircuitBreakerService } from '../circuit-breaker.service';
+import { fetchWithRetry } from './fetch-with-retry';
 
 interface OllamaChatChunk {
   message?: { role: string; content: string };
@@ -24,11 +26,25 @@ export class OllamaProvider implements AiProvider {
   private readonly baseUrl: string;
   private readonly logger = new Logger(OllamaProvider.name);
 
-  constructor(configService: ConfigService) {
+  constructor(
+    configService: ConfigService,
+    private readonly circuitBreaker: CircuitBreakerService,
+  ) {
     this.baseUrl = configService.getOrThrow<string>('OLLAMA_BASE_URL');
   }
 
   async *streamChat(request: AiChatRequest): AsyncIterable<AiStreamEvent> {
+    if (this.circuitBreaker.isOpen(this.key)) {
+      const retryInSeconds = Math.ceil(
+        this.circuitBreaker.cooldownRemainingMs(this.key) / 1000,
+      );
+      yield {
+        type: 'error',
+        message: `Ollama is temporarily unavailable after repeated failures; retrying in ~${retryInSeconds}s`,
+      };
+      return;
+    }
+
     // A single combined signal governs the whole request (connect + body
     // read): either the caller's own abort, a connect-timeout abort, or a
     // stream-inactivity abort ends it. The connect timer is cleared as soon
@@ -59,25 +75,30 @@ export class OllamaProvider implements AiProvider {
 
     let response: Response;
     try {
-      response = await fetch(`${this.baseUrl}/api/chat`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: request.model,
-          messages: request.messages,
-          stream: true,
-          options: {
-            temperature: request.temperature,
-          },
-        }),
-        signal: combinedSignal,
-      });
+      response = await fetchWithRetry(
+        () =>
+          fetch(`${this.baseUrl}/api/chat`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              model: request.model,
+              messages: request.messages,
+              stream: true,
+              options: {
+                temperature: request.temperature,
+              },
+            }),
+            signal: combinedSignal,
+          }),
+        combinedSignal,
+      );
     } catch (err) {
       clearTimeout(connectTimer);
       clearTimeout(inactivityTimer);
       if (request.abortSignal.aborted) {
         yield { type: 'done', finishReason: 'stopped' };
       } else if (connectController.signal.aborted) {
+        this.circuitBreaker.recordFailure(this.key);
         yield {
           type: 'error',
           message: `Connecting to Ollama timed out after ${OLLAMA_CONNECT_TIMEOUT_MS}ms`,
@@ -88,6 +109,7 @@ export class OllamaProvider implements AiProvider {
           message: `Ollama stream timed out after ${OLLAMA_STREAM_INACTIVITY_TIMEOUT_MS}ms of inactivity`,
         };
       } else {
+        this.circuitBreaker.recordFailure(this.key);
         yield {
           type: 'error',
           message: `Could not reach Ollama: ${(err as Error).message}`,
@@ -99,12 +121,22 @@ export class OllamaProvider implements AiProvider {
 
     if (!response.ok || !response.body) {
       clearTimeout(inactivityTimer);
+      // Ollama has no per-user API keys, so unlike Claude/OpenAI every non-2xx
+      // status here reflects the shared local instance's own health (a bad
+      // model name is the one common exception, hence excluding 4xx here too
+      // to avoid opening the circuit over a client-side typo repeated by one
+      // session) rather than one user's credentials.
+      if (response.status >= 500) {
+        this.circuitBreaker.recordFailure(this.key);
+      }
       yield {
         type: 'error',
         message: `Ollama returned HTTP ${response.status}`,
       };
       return;
     }
+
+    this.circuitBreaker.recordSuccess(this.key);
 
     const reader = response.body.getReader();
     const decoder = new TextDecoder();

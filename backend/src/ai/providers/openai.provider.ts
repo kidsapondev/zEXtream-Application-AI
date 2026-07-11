@@ -4,6 +4,8 @@ import {
   AiProvider,
   AiStreamEvent,
 } from '../ai-provider.interface';
+import { CircuitBreakerService } from '../circuit-breaker.service';
+import { fetchWithRetry } from './fetch-with-retry';
 
 const OPENAI_CHAT_COMPLETIONS_URL =
   'https://api.openai.com/v1/chat/completions';
@@ -39,34 +41,54 @@ async function mapUpstreamError(response: Response): Promise<string> {
 export class OpenAiProvider implements AiProvider {
   readonly key = 'openai' as const;
 
+  constructor(private readonly circuitBreaker: CircuitBreakerService) {}
+
   async *streamChat(request: AiChatRequest): AsyncIterable<AiStreamEvent> {
     if (!request.apiKey) {
       yield { type: 'error', message: 'No OpenAI API key configured' };
       return;
     }
 
+    if (this.circuitBreaker.isOpen(this.key)) {
+      const retryInSeconds = Math.ceil(
+        this.circuitBreaker.cooldownRemainingMs(this.key) / 1000,
+      );
+      yield {
+        type: 'error',
+        message: `OpenAI is temporarily unavailable after repeated failures; retrying in ~${retryInSeconds}s`,
+      };
+      return;
+    }
+
     let response: Response;
     try {
-      response = await fetch(OPENAI_CHAT_COMPLETIONS_URL, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${request.apiKey}`,
-          'content-type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: request.model,
-          messages: request.messages,
-          stream: true,
-          temperature: request.temperature,
-          max_tokens: request.maxTokens,
-        }),
-        signal: request.abortSignal,
-      });
+      response = await fetchWithRetry(
+        () =>
+          fetch(OPENAI_CHAT_COMPLETIONS_URL, {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${request.apiKey}`,
+              'content-type': 'application/json',
+            },
+            body: JSON.stringify({
+              model: request.model,
+              messages: request.messages,
+              stream: true,
+              temperature: request.temperature,
+              max_tokens: request.maxTokens,
+            }),
+            signal: request.abortSignal,
+          }),
+        request.abortSignal,
+      );
     } catch (err) {
       if (request.abortSignal.aborted) {
         yield { type: 'done', finishReason: 'stopped' };
         return;
       }
+      // A thrown fetch error (as opposed to an HTTP error status) is always a
+      // network-level problem, never a per-key issue, so it always counts.
+      this.circuitBreaker.recordFailure(this.key);
       yield {
         type: 'error',
         message: `Could not reach OpenAI: ${(err as Error).message}`,
@@ -75,9 +97,17 @@ export class OpenAiProvider implements AiProvider {
     }
 
     if (!response.ok || !response.body) {
+      // Only count server-side failures against the breaker — a bad/revoked
+      // key (401/403) or a per-key rate limit (429) is that user's problem,
+      // not a sign OpenAI itself is down, and must not lock out other users.
+      if (response.status >= 500) {
+        this.circuitBreaker.recordFailure(this.key);
+      }
       yield { type: 'error', message: await mapUpstreamError(response) };
       return;
     }
+
+    this.circuitBreaker.recordSuccess(this.key);
 
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
