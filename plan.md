@@ -490,7 +490,7 @@
 - [x] Auth endpoints กับ PostgreSQL จริงใน test container (`backend/test/auth.e2e-spec.ts` เพิ่มเติมจาก `app.e2e-spec.ts` เดิม)
 - [x] Session ownership ทุก REST endpoint
 - [x] Artifact ownership และ revisions (`backend/test/artifacts-ownership.e2e-spec.ts` — สร้าง artifact ตรงผ่าน Prisma ใต้ session ของ user A แล้วยืนยันว่า user B ได้ 403 ทั้ง list และ revisions endpoint, และ unauthenticated ได้ 401)
-- [~] Socket.IO connection/join/send/stop/edit — connection/join/send/stop ยืนยันผ่าน `socket.io-client` จริงแล้ว (`backend/test/websocket.e2e-spec.ts`, `backend/test/chat-stop.e2e-spec.ts`); `artifact:edit` ยังมีเฉพาะ unit-level coverage เดิม (`chat.gateway.spec.ts`) ไม่ได้เพิ่ม real-socket e2e ให้รอบนี้
+- [x] Socket.IO connection/join/send/stop/edit — connection/join/send/stop ยืนยันผ่าน `socket.io-client` จริงแล้ว (`backend/test/websocket.e2e-spec.ts`, `backend/test/chat-stop.e2e-spec.ts`); เพิ่ม `artifact:edit` real-socket e2e แล้ว (describe "artifact:edit (real socket, not the unit-mocked gateway)"): owner แก้ artifact ผ่าน socket จริงแล้วได้ revision ใหม่พร้อม broadcast `artifact:created` ไปยังทุกคนใน session room, และผู้ใช้อื่นที่ไม่ได้เป็นเจ้าของ session ถูก reject ด้วย `exception` event โดยไม่มี revision ใหม่ถูกสร้างเลย; e2e suite รวม 53/53 ผ่าน
 - [x] Cross-user negative tests
 - [x] Prisma migrations บน empty database (`backend/test/migrations-empty-db.e2e-spec.ts`)
 

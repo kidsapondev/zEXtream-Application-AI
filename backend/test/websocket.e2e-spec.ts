@@ -468,4 +468,103 @@ describe('WebSocket / Socket.IO integration (e2e)', () => {
       expect(reconciled?.errorMessage).toBe('Generation was interrupted.');
     });
   });
+
+  describe('artifact:edit (real socket, not the unit-mocked gateway)', () => {
+    async function seedArtifact(
+      sessionId: string,
+      overrides: { filename?: string; content?: string } = {},
+    ) {
+      const message = await prisma.message.create({
+        data: {
+          sessionId,
+          role: 'assistant',
+          content: 'Created a file.',
+          streamingStatus: 'complete',
+        },
+      });
+      return prisma.codeArtifact.create({
+        data: {
+          sessionId,
+          messageId: message.id,
+          filename: overrides.filename ?? 'src/index.ts',
+          language: 'typescript',
+          content: overrides.content ?? 'export const value = 1;',
+          revision: 1,
+          origin: 'ai',
+        },
+      });
+    }
+
+    it('creates a new revision and broadcasts artifact:created to everyone in the session room', async () => {
+      const { user, session } = await registerAndSession(
+        app,
+        'ws-artifact-edit',
+      );
+      createdUserIds.push(user.user.id);
+      const artifact = await seedArtifact(session.id);
+
+      const socket = connect(user.accessToken);
+      await waitForEvent(socket, 'connect');
+      socket.emit('session:join', { sessionId: session.id });
+      await sleep(150);
+
+      const createdPromise = waitForEvent<{
+        artifact: {
+          id: string;
+          revision: number;
+          content: string;
+          origin: string;
+        };
+      }>(socket, 'artifact:created');
+      socket.emit('artifact:edit', {
+        artifactId: artifact.id,
+        content: 'export const value = 2;',
+      });
+
+      const { artifact: updated } = await createdPromise;
+      expect(updated.revision).toBe(2);
+      expect(updated.content).toBe('export const value = 2;');
+      expect(updated.origin).toBe('user');
+
+      const revisions = await prisma.codeArtifact.findMany({
+        where: { sessionId: session.id, filename: 'src/index.ts' },
+        orderBy: { revision: 'asc' },
+      });
+      expect(revisions).toHaveLength(2);
+    });
+
+    it('rejects artifact:edit for an artifact in a session the connected user does not own, and creates no revision', async () => {
+      const { user: owner, session: ownerSession } = await registerAndSession(
+        app,
+        'ws-artifact-edit-owner',
+      );
+      createdUserIds.push(owner.user.id);
+      const { user: attacker } = await registerAndSession(
+        app,
+        'ws-artifact-edit-attacker',
+      );
+      createdUserIds.push(attacker.user.id);
+      const artifact = await seedArtifact(ownerSession.id, {
+        filename: 'src/secret.ts',
+        content: 'export const secret = 42;',
+      });
+
+      const socket = connect(attacker.accessToken);
+      await waitForEvent(socket, 'connect');
+
+      const exceptionPromise = waitForEvent(socket, 'exception');
+      socket.emit('artifact:edit', {
+        artifactId: artifact.id,
+        content: 'export const secret = "stolen";',
+      });
+
+      await expect(exceptionPromise).resolves.toBeDefined();
+
+      const revisions = await prisma.codeArtifact.findMany({
+        where: { sessionId: ownerSession.id, filename: 'src/secret.ts' },
+      });
+      expect(revisions).toHaveLength(1);
+      expect(revisions[0].content).toBe('export const secret = 42;');
+    });
+  });
 });
