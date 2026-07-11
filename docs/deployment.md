@@ -159,17 +159,50 @@ the host.
 ## Resource limits
 
 `docker-compose.prod.yml` sets `deploy.resources.limits`/`reservations` for
-`backend`, `frontend`, and `postgres`. These were chosen as reasonable
-starting points for a small-to-medium deployment (backend/postgres 512MB
-reserved / 1GB capped, 0.25 CPU reserved / 1.0 capped; frontend nginx 128MB
-reserved / 256MB capped, 0.1 CPU reserved / 0.5 capped) — **not** measured
-production requirements, since no real traffic has been load-tested against
-this stack. `limits` are enforced by the container runtime even under plain
-`docker compose up` (confirmed via `docker inspect` while verifying this
-runbook — no Swarm needed); `reservations` are accepted by compose but only
-actually used for scheduling decisions under Swarm, so they're a no-op today
-beyond documentation intent. Revisit these once you have real `docker stats`
-(or equivalent) data from production load.
+`backend`, `frontend`, and `postgres` (backend/postgres 512MB reserved / 1GB
+capped, 0.25 CPU reserved / 1.0 capped; frontend nginx 128MB reserved / 256MB
+capped, 0.1 CPU reserved / 0.5 capped). `limits` are enforced by the
+container runtime even under plain `docker compose up` (confirmed via
+`docker inspect` — no Swarm needed); `reservations` are accepted by compose
+but only actually used for scheduling decisions under Swarm, so they're a
+no-op today beyond documentation intent.
+
+### Load test results
+
+Ran a basic load test against the real `target: prod` backend image (built
+and run exactly as this runbook describes, limits actively enforced —
+confirmed via `docker inspect`) with the current dev Postgres data volume
+attached, using a small Node script driving concurrent `fetch()` calls
+against `localhost:3000` (not a dedicated tool like k6/autocannon, since this
+was a quick sanity check rather than a formal capacity-planning exercise —
+treat these as directional, not a guarantee):
+
+- **Burst load** (40 concurrent clients hammering `GET /api/health` as fast
+  as possible, each spoofing a distinct `X-Forwarded-For` so `TRUST_PROXY=1`
+  attributes them to different IPs): ~5,500 attempted req/s, about half
+  rejected with 429 — this is the default REST throttle (100 req/min per IP,
+  see `app.module.ts`) correctly kicking in once a single simulated client
+  blew through its own quota in about a second, not a capacity problem.
+  Successful requests: p50 11ms, p95 26ms, p99 58ms. Backend CPU pinned at
+  ~98% of its configured 1.0-core cap throughout; memory stayed in the
+  130–230MB range, well under the 1GB cap. Postgres barely registered (peak
+  ~7.6% CPU, ~45MB memory) since `/api/health` is a trivial `SELECT 1`.
+- **Sustained legitimate load** (150 concurrent simulated clients, each
+  paced to stay under the per-IP throttle, ~66 req/min/IP): 0 errors,
+  ~160 req/s sustained for 20s, p50 25ms, p95 76ms, p99 154ms, max 171ms.
+  Backend CPU only 7–14% of its 1.0-core cap; memory flat around 175MB.
+
+**Takeaway**: at the traffic levels tested, the backend's memory limit has
+substantial headroom (never exceeded ~230MB against a 1GB cap, including
+under the throttle-saturated burst case) — the CPU limit is the first thing
+that would need raising under real sustained load well above what was
+exercised here, not memory. These numbers only cover `GET /api/health` and
+an authenticated `GET /api/chat/sessions` read (ad hoc script, not committed
+to the repo — describes its own methodology above, worth redoing with a
+proper tool like k6/autocannon if this needs to be repeatable) — they say
+nothing about AI-streaming load (which is bounded by the upstream provider,
+not this service's own CPU) or write-heavy paths. Revisit with a
+production-realistic traffic mix before trusting these limits at real scale.
 
 ## Health checks
 
