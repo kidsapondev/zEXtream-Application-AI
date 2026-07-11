@@ -14,8 +14,17 @@ interface OllamaChatChunk {
   done_reason?: string;
 }
 
-/** Time allowed to establish the connection (fetch resolving with a response). */
-export const OLLAMA_CONNECT_TIMEOUT_MS = 10_000;
+/**
+ * Time allowed to establish the connection (fetch resolving with a response).
+ * Generous on purpose: Ollama only loads a model into RAM/VRAM on its first
+ * request (or after it's been idle long enough to unload) — for a large
+ * local model that cold load alone can take well over 10s before Ollama
+ * even starts responding, which a short timeout would misreport as
+ * "unreachable" on every first message of a session. Confirmed by hand: a
+ * 14B Q4 model (~14.6GB) reproducibly missed a 10s connect timeout on cold
+ * load, then answered normally once warm.
+ */
+export const OLLAMA_CONNECT_TIMEOUT_MS = 90_000;
 
 /** Time allowed between successive stream chunks before the stream is considered stalled. */
 export const OLLAMA_STREAM_INACTIVITY_TIMEOUT_MS = 30_000;
@@ -51,6 +60,15 @@ export class OllamaProvider implements AiProvider {
     // as a response is received so it can never misfire mid-stream; the
     // inactivity timer is (re)armed on every chunk received so a healthy,
     // merely slow stream is never killed, only a stalled one.
+    //
+    // Deliberately NOT armed yet at this point: Ollama doesn't send response
+    // headers until it's ready to start streaming, so a cold model load (see
+    // OLLAMA_CONNECT_TIMEOUT_MS above) happens entirely before fetch()
+    // resolves — that whole window belongs to the connect timeout. Arming
+    // the (much shorter) inactivity timer this early would race the connect
+    // timeout and misreport a slow cold load as "stream timed out due to
+    // inactivity" instead of "still connecting". It's armed for real right
+    // after the connection succeeds, below.
     const connectController = new AbortController();
     const connectTimer = setTimeout(
       () => connectController.abort(),
@@ -65,7 +83,6 @@ export class OllamaProvider implements AiProvider {
         OLLAMA_STREAM_INACTIVITY_TIMEOUT_MS,
       );
     };
-    armInactivityTimer();
 
     const combinedSignal = AbortSignal.any([
       request.abortSignal,
@@ -94,7 +111,9 @@ export class OllamaProvider implements AiProvider {
       );
     } catch (err) {
       clearTimeout(connectTimer);
-      clearTimeout(inactivityTimer);
+      // inactivityController can't be the cause here: its timer isn't armed
+      // until after the connection succeeds (see below), which by
+      // definition hasn't happened if this fetch attempt just threw.
       if (request.abortSignal.aborted) {
         yield { type: 'done', finishReason: 'stopped' };
       } else if (connectController.signal.aborted) {
@@ -102,11 +121,6 @@ export class OllamaProvider implements AiProvider {
         yield {
           type: 'error',
           message: `Connecting to Ollama timed out after ${OLLAMA_CONNECT_TIMEOUT_MS}ms`,
-        };
-      } else if (inactivityController.signal.aborted) {
-        yield {
-          type: 'error',
-          message: `Ollama stream timed out after ${OLLAMA_STREAM_INACTIVITY_TIMEOUT_MS}ms of inactivity`,
         };
       } else {
         this.circuitBreaker.recordFailure(this.key);
@@ -120,7 +134,6 @@ export class OllamaProvider implements AiProvider {
     clearTimeout(connectTimer);
 
     if (!response.ok || !response.body) {
-      clearTimeout(inactivityTimer);
       // Ollama has no per-user API keys, so unlike Claude/OpenAI every non-2xx
       // status here reflects the shared local instance's own health (a bad
       // model name is the one common exception, hence excluding 4xx here too
@@ -137,6 +150,11 @@ export class OllamaProvider implements AiProvider {
     }
 
     this.circuitBreaker.recordSuccess(this.key);
+
+    // The connection succeeded and headers are in — now, and only now, does
+    // "no data for N seconds" mean a stalled stream rather than a slow/cold
+    // connection. See the comment where inactivityController is created.
+    armInactivityTimer();
 
     const reader = response.body.getReader();
     const decoder = new TextDecoder();

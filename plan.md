@@ -255,7 +255,7 @@
 - [x] ป้องกัน send ซ้อนหลาย stream ใน session เดียว หรือกำหนด concurrency policy ให้ชัดเจน (`ActiveStreamRegistry.hasActiveStream()`/`register(messageId, sessionId)`; นโยบายคือ 1 stream ต่อ session เอกสารไว้ใน doc comment ของ `ActiveStreamRegistry`)
 - [x] ยกเลิก active streams ก่อนลบ session (`ActiveStreamRegistry.stopAllForSession()` เรียกจาก `ChatSessionsService.remove()`)
 - [x] จัดการ client disconnect ระหว่าง stream (`ChatGateway` implements `OnGatewayDisconnect`; ยืนยันด้วย regression test ว่า `finalizeAssistantMessage`/emit ยังทำงานแม้ client ที่เริ่ม stream disconnect ระหว่างทาง)
-- [x] กำหนด timeout สำหรับ Ollama request และ stream inactivity (`OLLAMA_CONNECT_TIMEOUT_MS` 10s, `OLLAMA_STREAM_INACTIVITY_TIMEOUT_MS` 30s ใน `ollama.provider.ts`)
+- [x] กำหนด timeout สำหรับ Ollama request และ stream inactivity — **ปรับแก้จากการทดสอบจริง**: `OLLAMA_CONNECT_TIMEOUT_MS` เดิม 10s สั้นเกินไปจริง — ทดสอบกับ Ollama จริง (โมเดล 14B ~14.6GB) พบว่า cold load (ครั้งแรกหรือหลัง idle นานจน unload) ใช้เวลาเกิน 10s ได้จริง ทำให้ request แรกของ session ล้มเหลวเสมอ จึงปรับเป็น 90s; ระหว่างแก้พบบั๊กที่สองด้วย: `armInactivityTimer()` เดิมถูกเรียกตั้งแต่ก่อน fetch() เริ่ม ทำให้ inactivity timer (30s) แข่งกับ connect timer และ misreport "stream timed out จาก inactivity" ทั้งที่จริงคือ "ยังเชื่อมต่อ/รอโมเดลโหลดอยู่" — แก้โดยเลื่อนการ arm inactivity timer ไปเริ่มหลัง connect สำเร็จเท่านั้น ยืนยันด้วย unit test เดิม (`OllamaProvider.spec.ts`) และทดสอบจริงกับ Ollama cold/warm สองรอบ
 - [x] ตรวจ malformed/non-JSON lines จาก Ollama โดยไม่ทำให้ message ค้าง (skip บรรทัดที่ parse ไม่ได้และ stream ต่อ แทนที่จะ fail ทั้ง stream; มี test คุม)
 - [x] ปรับ session title อัตโนมัติจากข้อความแรก หากต้องการ UX แบบ chat application (`deriveSessionTitle()` ใน `chat.gateway.ts` + `ChatSessionsService.setTitleIfDefault()`)
 
@@ -497,9 +497,9 @@
 Playwright suite ที่ `e2e/` (root-level, ขับทั้ง frontend จริง + backend จริง — ดู `e2e/README.md` สำหรับวิธีรัน) รัน `pnpm --filter e2e test:e2e:browser` ผ่านแล้ว 5 tests, skip 2 tests ที่ต้องมี Ollama จริง:
 
 - [x] Register → login → create chat (`e2e/tests/auth-and-chat.spec.ts`)
-- [ ] Send prompt → เห็น token streaming — **ต้องมี Ollama จริงที่ reachable พร้อม model ที่ pull แล้ว** ไม่มีในสภาพแวดล้อมนี้; เขียนไว้เป็น `test.skip()` ที่ `e2e/tests/ai-dependent.spec.ts` พร้อม comment บอกขั้นตอนรันจริง ไม่ mock WebSocket event เพื่อไม่ให้ผ่านเทียม
-- [ ] Generate code → เห็น Monaco progressive stream — เหตุผลเดียวกับข้างบน (`e2e/tests/ai-dependent.spec.ts`)
-- [ ] Edit code → revision เพิ่ม — ยังไม่ได้ทำรอบนี้ (ต้องมี artifact จริงในหน้าจอก่อนถึงจะแก้ได้ ซึ่งปกติมาจาก AI stream; ยังไม่ได้เขียนเส้นทางสร้าง artifact ผ่าน UI โดยไม่พึ่ง AI)
+- [x] Send prompt → เห็น token streaming — **ยืนยันจริงแล้วด้วยมือ** ผ่าน Ollama จริงที่ reachable บนเครื่อง (`qwen2.5-coder:14b`, ~14.6GB) ผ่าน `docker compose` dev stack: ส่งข้อความจริง เห็น token stream เข้ามาและ AI ตอบถูกต้อง ระหว่างตรวจพบและแก้บั๊กจริง 2 จุดด้วย (ดู Phase 4 P1 ด้านล่าง: connect-timeout สั้นเกินไปสำหรับ cold model load, และ inactivity timer แข่งกับ connect timer ผิดจังหวะ) — automated `e2e/tests/ai-dependent.spec.ts` ยังเป็น `test.skip()` เหมือนเดิมเพราะ CI ทั่วไปไม่มี Ollama ติดตั้ง ไม่ใช่เพราะ feature ใช้งานไม่ได้
+- [x] Generate code → เห็น Monaco progressive stream — ยืนยันจริงแล้วด้วยมือพร้อมกับข้างบน: สั่งสร้างไฟล์ `.py`/`.js` จริง เห็นโค้ดขึ้นใน Monaco ถูกต้อง, syntax highlighting ทำงาน, ไฟล์ปรากฏใน tab
+- [x] Edit code → revision เพิ่ม — ยืนยันจริงแล้วด้วยมือ: แก้โค้ดใน Monaco หลังจาก AI สร้างไฟล์ (ผ่าน artifact จริงจาก AI stream ตามที่ตั้งใจไว้ ไม่ต้องมี path แยกที่ไม่พึ่ง AI), เกิด Revision 2 (origin: user) ถัดจาก Revision 1 (origin: ai) ใน revision history ถูกต้อง, reload หน้าแล้ว title/session/ไฟล์/เนื้อหายังอยู่ครบ
 - [x] Reload → session/messages/artifacts กลับมาครบ (`e2e/tests/auth-and-chat.spec.ts` — reload จริงด้วย `page.reload()` ยืนยัน session/message กลับมา; ไม่มี artifact ในเคสนี้เพราะไม่มี AI จริงสร้างให้)
 - [x] Stop generation (`e2e/tests/stop-generation.spec.ts` — กดปุ่ม Stop ถ้าทันหน้าต่าง streaming สั้นๆ ของ Ollama unreachable, ยืนยัน composer กลับมาใช้งานได้ปกติไม่ค้างไม่ว่าทางไหน)
 - [x] Logout → login อีก user → socket identity เปลี่ยนถูกต้อง (`e2e/tests/identity-switch.spec.ts` — ยืนยัน user ใหม่ไม่เห็น session/ข้อความของ user เดิมแม้ navigate ตรงไป URL เดิม)
