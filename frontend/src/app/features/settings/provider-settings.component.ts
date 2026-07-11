@@ -12,6 +12,8 @@ import { AuthStore } from '../../core/auth.store';
 import { ToastService } from '../../core/toast.service';
 import { SessionListStore } from '../chat/session-list.store';
 
+const DEFAULT_OLLAMA_MODEL = 'qwen2.5-coder:14b';
+
 @Component({
   selector: 'app-provider-settings',
   imports: [
@@ -42,9 +44,21 @@ export class ProviderSettingsComponent {
     void this.load();
   }
 
+  /**
+   * Mirrors the same "skip the picker when there's no real choice" rule as
+   * `ChatWorkspaceComponent.onNewChat()`. This page doesn't host the
+   * provider/model dialog itself (it's a chat-workspace concern), so once
+   * more than Ollama is configured, "+" just lands on `/chat` where the
+   * dialog is available instead of guessing a provider here.
+   */
   async onNewChat() {
-    const session = await this.sessionListStore.createSession('ollama', 'qwen2.5-coder:14b');
-    await this.router.navigate(['/chat', session.id]);
+    const configuredCount = this.settings().filter((s) => s.configured).length;
+    if (configuredCount <= 1) {
+      const session = await this.sessionListStore.createSession('ollama', DEFAULT_OLLAMA_MODEL);
+      await this.router.navigate(['/chat', session.id]);
+      return;
+    }
+    await this.router.navigateByUrl('/chat');
   }
 
   async onLogout() {

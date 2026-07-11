@@ -63,6 +63,18 @@ services:
         condition: service_completed_successfully
     networks:
       - appnet
+    # Backend listens on :3000 in both the dev (`pnpm start:dev`) and prod (`node
+    # dist/main.js`) targets, so this one healthcheck is valid for either — unlike
+    # frontend's, whose internal port differs by target (see docker-compose.prod.yml).
+    # Hits liveness (GET /api/health), not readiness (/api/health/ready, which also
+    # pings Postgres) — a database blip shouldn't make an orchestrator restart a
+    # perfectly healthy backend process.
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:3000/api/health || exit 1']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 
   frontend:
     build:
@@ -70,6 +82,7 @@ services:
       dockerfile: frontend/Dockerfile
     restart: unless-stopped
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     networks:
       - appnet

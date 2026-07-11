@@ -50,3 +50,10 @@
     }
   </div>
 </ds-app-shell>
+
+<app-new-session-dialog
+  [open]="showNewSessionDialog()"
+  [providers]="providerCatalogStore.configuredProviders()"
+  (created)="onCreateSession($event)"
+  (cancelled)="onCancelNewSession()"
+/>

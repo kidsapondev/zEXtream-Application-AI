@@ -1,0 +1,64 @@
+@if (open()) {
+  <div class="new-session-dialog__backdrop" (click)="cancelled.emit()">
+    <div
+      #dialogEl
+      class="new-session-dialog"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="new-session-dialog-title"
+      tabindex="-1"
+      (click)="$event.stopPropagation()"
+      (keydown.escape)="cancelled.emit()"
+    >
+      <h2 id="new-session-dialog-title" class="new-session-dialog__title">Start a new chat</h2>
+
+      <div class="new-session-dialog__field">
+        <span class="new-session-dialog__label">Provider</span>
+        <ds-segmented-tabs
+          [options]="providerOptions()"
+          [selected]="selectedProvider()"
+          (selectedChange)="onProviderChange($event)"
+        />
+      </div>
+
+      @if (selectedProvider() === 'ollama') {
+        <div class="new-session-dialog__field">
+          <span class="new-session-dialog__label">Model</span>
+          <input
+            type="text"
+            class="new-session-dialog__input"
+            list="ollama-model-suggestions"
+            placeholder="e.g. qwen2.5-coder:14b"
+            autocomplete="off"
+            [ngModel]="customOllamaModel()"
+            (ngModelChange)="customOllamaModel.set($event)"
+          />
+          <datalist id="ollama-model-suggestions">
+            @for (model of commonOllamaModels; track model) {
+              <option [value]="model"></option>
+            }
+          </datalist>
+          <p class="new-session-dialog__hint">
+            Any model already pulled in your local Ollama install works — type its name.
+          </p>
+        </div>
+      } @else if (modelOptions().length > 0) {
+        <div class="new-session-dialog__field">
+          <span class="new-session-dialog__label">Model</span>
+          <ds-segmented-tabs
+            [options]="modelOptions()"
+            [selected]="selectedModel()"
+            (selectedChange)="selectedModel.set($event)"
+          />
+        </div>
+      }
+
+      <div class="new-session-dialog__actions">
+        <button type="button" class="btn" (click)="cancelled.emit()">Cancel</button>
+        <button type="button" class="btn btn--primary" [disabled]="!canCreate()" (click)="confirm()">
+          Start chat
+        </button>
+      </div>
+    </div>
+  </div>
+}

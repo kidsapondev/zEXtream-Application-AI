@@ -1,17 +1,30 @@
-import { Component, effect, inject, input } from '@angular/core';
+import { Component, effect, inject, input, signal } from '@angular/core';
+import { HttpErrorResponse } from '@angular/common/http';
 import { Router } from '@angular/router';
+import type { AiProviderKey } from '@app/shared-types';
 import { AppShellComponent } from '../../design-system/app-shell/app-shell.component';
 import { AuthStore } from '../../core/auth.store';
 import { SocketService } from '../../core/socket.service';
+import { ToastService } from '../../core/toast.service';
 import { SessionListStore } from './session-list.store';
+import { ProviderCatalogStore } from './provider-catalog.store';
 import { SessionListItemComponent } from './session-list-item/session-list-item.component';
 import { ChatThreadComponent } from './chat-thread/chat-thread.component';
+import { NewSessionDialogComponent } from './new-session-dialog/new-session-dialog.component';
 import { ArtifactStore } from '../code-editor/artifact.store';
 import { CodeEditorPanelComponent } from '../code-editor/code-editor-panel.component';
 
+const DEFAULT_OLLAMA_MODEL = 'qwen2.5-coder:14b';
+
 @Component({
   selector: 'app-chat-workspace',
-  imports: [AppShellComponent, SessionListItemComponent, ChatThreadComponent, CodeEditorPanelComponent],
+  imports: [
+    AppShellComponent,
+    SessionListItemComponent,
+    ChatThreadComponent,
+    CodeEditorPanelComponent,
+    NewSessionDialogComponent,
+  ],
   templateUrl: './chat-workspace.component.html',
   styleUrl: './chat-workspace.component.scss',
 })
@@ -20,9 +33,13 @@ export class ChatWorkspaceComponent {
 
   protected readonly authStore = inject(AuthStore);
   protected readonly sessionListStore = inject(SessionListStore);
+  protected readonly providerCatalogStore = inject(ProviderCatalogStore);
   protected readonly artifactStore = inject(ArtifactStore);
   protected readonly socketService = inject(SocketService);
+  private readonly toastService = inject(ToastService);
   private readonly router = inject(Router);
+
+  protected readonly showNewSessionDialog = signal(false);
 
   constructor() {
     effect(() => {
@@ -31,9 +48,46 @@ export class ChatWorkspaceComponent {
     });
   }
 
+  /**
+   * Ollama (no key required) is always "configured", so if it's the only
+   * configured provider there is no real choice to make — skip the dialog
+   * and create the session immediately to keep "+" a single click for the
+   * common case. Once the user has configured Claude and/or OpenAI, "+"
+   * opens the picker so they can choose.
+   */
   async onNewChat() {
-    const session = await this.sessionListStore.createSession('ollama', 'qwen2.5-coder:14b');
-    await this.router.navigate(['/chat', session.id]);
+    const configured = this.providerCatalogStore.configuredProviders();
+    if (configured.length <= 1) {
+      await this.createSession('ollama', DEFAULT_OLLAMA_MODEL);
+      return;
+    }
+    this.showNewSessionDialog.set(true);
+  }
+
+  async onCreateSession(choice: { provider: AiProviderKey; model: string }) {
+    await this.createSession(choice.provider, choice.model);
+  }
+
+  onCancelNewSession() {
+    this.showNewSessionDialog.set(false);
+  }
+
+  private async createSession(provider: AiProviderKey, model: string) {
+    try {
+      const session = await this.sessionListStore.createSession(provider, model);
+      this.showNewSessionDialog.set(false);
+      await this.router.navigate(['/chat', session.id]);
+    } catch (err) {
+      // The backend rejects claude/openai session creation with a clear
+      // BadRequestException message (e.g. "Configure an API key for claude
+      // before starting a session with it") when the user's key is missing
+      // or was removed since the picker loaded stale `configured` state.
+      const message =
+        err instanceof HttpErrorResponse && typeof err.error?.message === 'string'
+          ? err.error.message
+          : 'Could not start a new chat. Please try again.';
+      this.toastService.show(message, 'error');
+    }
   }
 
   async onSettings() {

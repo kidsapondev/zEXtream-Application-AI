@@ -1,14 +1,56 @@
+# Resource limits below are starting points for a small-to-medium deployment, not
+# measured production requirements — nothing here was load-tested. Tune `limits` (the
+# hard cap; the container is throttled/OOM-killed past it) and `reservations` (what
+# Docker guarantees is available, used for scheduling) once you have real traffic/memory
+# data from `docker stats` or equivalent. `deploy.resources` requires Swarm to enforce
+# `reservations`; under plain `docker compose up` (no Swarm), `limits` still apply via
+# the container runtime but `reservations` are accepted and otherwise ignored.
 services:
   migrate:
     build:
       target: prod
 
+  postgres:
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 512M
+
   backend:
     build:
       target: prod
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 512M
 
   frontend:
     build:
       target: prod
+    # Production nginx image (nginxinc/nginx-unprivileged) listens on 8080, not 80 —
+    # it runs entirely as a non-root user, which can't bind privileged ports. See
+    # frontend/Dockerfile and frontend/nginx.conf.
     ports:
-      - '80:80'
+      - '80:8080'
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:8080/ || exit 1']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 128M

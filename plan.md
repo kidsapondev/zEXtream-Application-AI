@@ -108,12 +108,12 @@
 
 ### ต้องทำต่อ
 
-- [ ] เพิ่ม integration test ที่รัน migrations บน database ว่าง
-- [ ] ทดสอบ cascade delete ของ user/session/message/artifact
-- [ ] ตรวจ compatibility ของ `uuidv7()` กับ PostgreSQL environment ทุกแห่งที่จะ deploy
+- [x] เพิ่ม integration test ที่รัน migrations บน database ว่าง (`backend/test/migrations-empty-db.e2e-spec.ts` — สร้าง throwaway database จริงใน Postgres instance เดียวกัน รัน `pnpm exec prisma migrate deploy` ตรงกับคำสั่งที่ `docker-compose.yml`'s `migrate` service ใช้ ยืนยัน table/`_prisma_migrations` ครบ แล้ว drop database ทิ้ง; รันจริงผ่านแล้วทั้งกับ `docker compose up -d postgres` และกับ standalone container แยก)
+- [x] ทดสอบ cascade delete ของ user/session/message/artifact (`backend/test/cascade-delete.e2e-spec.ts` — ยืนยันจาก migration SQL จริงว่า user→session/refresh_token/provider_credential, session→message/code_artifact, message→code_artifact ทั้งหมด `ON DELETE CASCADE`; ส่วน `code_artifacts.parent_artifact_id` (revision chain) เป็น `ON DELETE SET NULL` ไม่ cascade — มี test คุมทั้งสามกรณี)
+- [x] ตรวจ compatibility ของ `uuidv7()` กับ PostgreSQL environment ทุกแห่งที่จะ deploy — ยืนยันแล้วว่าเป็น native builtin function ของ PostgreSQL 18 (RFC 9562 version-7 UUID) ไม่ใช่ extension (`pgcrypto`/`uuid-ossp`); ไม่มี `CREATE EXTENSION` ใน migration ใดเลย และ `docker-compose.yml` pin `postgres:18.4-alpine` ตรงกันพอดี ทดสอบจริงทั้งเรียก `SELECT uuidv7()` ตรงๆ และ insert row จริงแล้วตรวจ format ของ id ที่ได้ (`backend/test/migrations-empty-db.e2e-spec.ts`, `backend/test/cascade-delete.e2e-spec.ts`)
 - [x] เพิ่ม cleanup policy สำหรับ refresh tokens ที่หมดอายุหรือ revoked แล้ว (`RefreshTokenCleanupService` ดู Phase 7 → Reliability)
-- [ ] พิจารณา pagination สำหรับ messages, sessions และ artifact revisions
-- [ ] ปรับ `listLatestForSession()` ให้ query เฉพาะ revision ล่าสุดจาก database แทนโหลดทุก revision เข้า memory
+- [x] พิจารณา pagination สำหรับ messages, sessions และ artifact revisions — เพิ่ม optional `limit`/`offset` query params (offset-based, ไม่ใช่ cursor-based — เลือกเพราะ list ทุกอันถูก scope ด้วย user/session เดียวอยู่แล้ว ไม่ใช่ global feed ขนาดใหญ่ ทำให้ downside ของ OFFSET/LIMIT ไม่มีนัยสำคัญที่ scale นี้ และง่ายกว่า cursor มากในแง่ backward compatibility) ให้ `GET /api/chat/sessions`, `GET /api/chat/sessions/:id/messages` และ `GET /api/chat/sessions/:sessionId/artifacts/revisions`; ค่า default page size คือ 50 เมื่อขอ pagination แต่ไม่ระบุ `limit`; เมื่อไม่ส่ง `limit`/`offset` เลย endpoint คืนค่าเหมือนเดิมทุกประการ (มี test ยืนยันทั้ง omitted-params case และ paginated case ใน `backend/test/pagination.e2e-spec.ts`) — ดู `backend/src/chat/dto/pagination-query.dto.ts` สำหรับ rationale เต็ม; `MessagesService.listForSession()` ที่ `ChatGateway` เรียกแบบไม่มี pagination เพื่อสร้าง AI context ยังคืนค่าครบทุก message เหมือนเดิม ไม่ถูกกระทบ. **retention policy ยังไม่ได้ทำ** — pagination วางฐานให้ retention ทำต่อได้ แต่การตัดสินใจว่าจะเก็บข้อมูลนานเท่าไหร่/ลบแบบไหนเป็น product decision ที่ต้องตัดสินใจแยก ไม่อยู่ในขอบเขตรอบนี้ (เป็น code-only pass)
+- [x] ปรับ `listLatestForSession()` ให้ query เฉพาะ revision ล่าสุดจาก database แทนโหลดทุก revision เข้า memory — เปลี่ยนเป็น `SELECT DISTINCT ON (filename) ... ORDER BY filename, revision DESC` ผ่าน `$queryRaw`/`Prisma.sql` (parameterized, ไม่ string-interpolate `sessionId`) แทนการ `findMany` ทุก revision แล้ว reduce ใน memory; method signature และ return shape (`Promise<CodeArtifact[]>`) ไม่เปลี่ยน จึงไม่กระทบ `ChatGateway`/`ArtifactsController` ที่เรียกอยู่; พิสูจน์ behavior-equivalence ด้วย `backend/test/artifacts-latest-revision.e2e-spec.ts` ซึ่ง reimplement algorithm เดิมแยกต่างหากแล้วเทียบกับ session ที่มีหลายไฟล์ หลาย revision ต่อไฟล์ ผ่านทั้ง service เรียกตรงและผ่าน REST endpoint
 
 เกณฑ์รับงาน:
 
@@ -159,15 +159,15 @@
 
 ### P1 — Tests ที่ต้องเพิ่ม
 
-- [ ] Register สำเร็จและ duplicate email
-- [ ] Login รหัสผ่านถูก/ผิด และ inactive user
-- [ ] Refresh สำเร็จ
-- [ ] Refresh token หมดอายุ
-- [ ] Refresh token reuse detection
-- [x] Concurrent refresh สอง request
-- [ ] Logout แล้ว refresh ไม่ได้
-- [ ] Hard reload แล้ว restore session ได้
-- [x] หลาย tab ใช้ refresh cookie เดียวกัน
+- [x] Register สำเร็จและ duplicate email (`backend/test/auth.e2e-spec.ts`)
+- [x] Login รหัสผ่านถูก/ผิด และ inactive user (`backend/test/auth.e2e-spec.ts`)
+- [x] Refresh สำเร็จ (`backend/test/auth.e2e-spec.ts`)
+- [x] Refresh token หมดอายุ (`backend/test/auth.e2e-spec.ts` — ตั้ง `expiresAt` ของ DB row ให้อยู่ในอดีตตรงๆ แทนการรอ JWT หมดอายุจริง)
+- [x] Refresh token reuse detection (`backend/test/auth.e2e-spec.ts` — ยืนยันว่า token family ทั้งหมดถูก revoke)
+- [x] Concurrent refresh สอง request (`backend/test/app.e2e-spec.ts`)
+- [x] Logout แล้ว refresh ไม่ได้ (`backend/test/auth.e2e-spec.ts`)
+- [x] Hard reload แล้ว restore session ได้ (`backend/test/auth.e2e-spec.ts` — จำลอง flow ของ frontend app initializer: refresh ด้วย cookie อย่างเดียวไม่มี Authorization header แล้วยืนยัน access token ใหม่เรียก REST ได้จริง; ฝั่ง browser จริงยืนยันเพิ่มใน `e2e/tests/auth-and-chat.spec.ts` ผ่าน `page.reload()`)
+- [x] หลาย tab ใช้ refresh cookie เดียวกัน (`backend/test/app.e2e-spec.ts` ระดับ HTTP; `e2e/tests/refresh-token-race.spec.ts` ระดับ browser จริง — เปิดสอง page ใน context เดียวกัน บังคับให้ยิง `/api/auth/refresh` พร้อมกันจริงๆ ด้วย network-level gate แล้วยืนยันว่ามี tab หนึ่งใช้งานได้เสมอ และ tab ที่แพ้ race จะ redirect ไป `/login` สะอาดๆ ไม่ค้าง)
 
 เกณฑ์รับงาน:
 
@@ -270,14 +270,14 @@
 
 ### Tests ที่ต้องเพิ่ม
 
-- [ ] WebSocket connection ด้วย token ถูกต้อง/ผิด/หมดอายุ
-- [ ] Join session ตัวเองและปฏิเสธ session ของ user อื่น
-- [ ] Send → created → token → updated ครบลำดับ
-- [ ] Stop generation ของตัวเอง
-- [ ] ปฏิเสธ stop generation ของ user อื่น
-- [ ] Ollama unavailable, HTTP error, malformed stream และ timeout
-- [ ] Server restart แล้ว reconcile stuck message
-- [ ] Logout/login คนละบัญชีใน browser instance เดิม
+- [x] WebSocket connection ด้วย token ถูกต้อง/ผิด/หมดอายุ (`backend/test/websocket.e2e-spec.ts` ผ่าน `socket.io-client` จริงต่อ server จริง)
+- [x] Join session ตัวเองและปฏิเสธ session ของ user อื่น (`backend/test/websocket.e2e-spec.ts`)
+- [x] Send → created → token → updated ครบลำดับ (`backend/test/websocket.e2e-spec.ts` — ยืนยัน created(user) → created(assistant, streaming) → updated(error) ครบลำดับผ่าน socket จริง กับ Ollama ที่ unreachable จริงตาม config; ไม่มี `chat:token` เพราะ fetch ล้มเหลวก่อนได้ response ซึ่งเป็น error path จริงที่ deterministic กว่าการรอ Ollama จริง)
+- [x] Stop generation ของตัวเอง (`backend/test/chat-stop.e2e-spec.ts` — ใช้ black-hole TCP server แทน Ollama จริงเพื่อจำลอง stream ที่ค้างจริง แล้วยืนยัน `chat:stop` ทำให้ finalize เป็น `stopped` ผ่าน socket จริง; abort mechanics ระดับ unit ถูกคุมโดย `active-stream-registry.service.spec.ts` อยู่แล้ว)
+- [x] ปฏิเสธ stop generation ของ user อื่น (`backend/test/chat-stop.e2e-spec.ts`)
+- [~] Ollama unavailable, HTTP error, malformed stream และ timeout — unavailable (connection refused) ยืนยันผ่าน WS e2e เต็มเส้นทางแล้ว (`websocket.e2e-spec.ts`); HTTP error/malformed-line/timeout ยืนยันแล้วที่ unit level เท่านั้น (`ollama.provider.spec.ts`) ไม่ได้ทำซ้ำผ่าน real socket เพราะพฤติกรรมเดียวกันหลังออกจาก provider (finalize เป็น `error` พร้อม emit `chat:message:updated`) ถูกยืนยันแล้วด้วยเคส unavailable
+- [x] Server restart แล้ว reconcile stuck message (`backend/test/websocket.e2e-spec.ts` — insert message ด้วย `streamingStatus: 'streaming'` ตรงๆ ผ่าน Prisma จำลอง crash กลาง stream แล้วเรียก `GET /messages` จริงยืนยันว่า `reconcileStuckMessages()` ทำงานจริงกับ DB จริง)
+- [x] Logout/login คนละบัญชีใน browser instance เดิม — ฝั่ง backend socket identity ยืนยันแล้ว (`backend/test/websocket.e2e-spec.ts` — reconnect socket instance เดิมด้วย auth ใหม่ mirror `SocketService.setAccessToken()`); ฝั่ง browser จริงยืนยันเพิ่มใน `e2e/tests/identity-switch.spec.ts`
 
 เกณฑ์รับงาน:
 
@@ -390,7 +390,7 @@
 - [x] เพิ่ม provider capability metadata เช่น models, streaming, max tokens (`ProviderSettingsService.listForUser()` คืน `models: string[]` ต่อ provider แล้ว; ollama ว่างเพราะไม่มี fixed catalog)
 - [x] เพิ่ม `/settings/providers` route และ page
 - [~] เพิ่ม wizard/modal สำหรับเพิ่ม API key และทดสอบ connection (มี API key form แล้ว; backend connection-test endpoint พร้อมแล้ว — `POST /api/settings/providers/:provider/test`; ฝั่ง UI ยังไม่ได้ต่อปุ่ม test เข้ากับ endpoint นี้)
-- [ ] เพิ่ม model selector ตอนสร้างหรือแก้ session (ยังเป็นงาน frontend UI; backend มีเฉพาะ model catalog ให้เลือกใช้แล้วผ่าน `models` field ด้านบน)
+- [x] เพิ่ม model selector ตอนสร้างหรือแก้ session — **สร้าง session**: `app-new-session-dialog` (`frontend/src/app/features/chat/new-session-dialog/`) เปิดจากปุ่ม "+" เมื่อผู้ใช้มี provider ที่ `configured` มากกว่าแค่ ollama (`ProviderCatalogStore` อ่าน `/api/settings/providers`); ถ้ามีแค่ ollama ข้าม dialog แล้วสร้าง session ทันทีเพื่อไม่ให้ต้องคลิกเพิ่มโดยไม่มีตัวเลือกจริง ๆ ให้เลือก; provider ใช้ `ds-segmented-tabs`, model ของ claude/openai ใช้ `ds-segmented-tabs` จาก `models` field, ollama ใช้ text input + `<datalist>` แนะนำชื่อ model ที่พบบ่อยเพราะ ollama ไม่มี fixed catalog; error จาก backend (เช่น "Configure an API key for claude...") toast ผ่าน `ToastService` แทนที่จะ fail เงียบ ๆ. **แก้ session ที่มีอยู่แล้ว**: ยังไม่ทำ — ตรวจแล้วว่า `UpdateSessionDto` (`backend/src/chat/dto/update-session.dto.ts`) รองรับเฉพาะ `title`/`isArchived` เท่านั้น ไม่มี `defaultProvider`/`defaultModel` ให้แก้ (ตรวจซ้ำหลัง pagination agent เพิ่ม `PaginationQueryDto` เข้า controller เดียวกัน — ยังไม่มีการเพิ่ม field นี้) การเพิ่ม field นี้ต้องแก้ backend DTO/service ซึ่งอยู่นอกขอบเขตที่มอบหมายรอบนี้ (frontend + Docker เท่านั้น) จึงทิ้งไว้เป็น follow-up ที่ต้องแก้ backend ก่อนถึงจะเพิ่ม UI ได้
 - [x] จำกัด DTO ให้เลือกเฉพาะ provider ที่ configured และ runtime รองรับ (`ENABLED_PROVIDERS` ขยายเป็นทั้งสาม provider ที่ runtime รองรับ + per-user key check ใน `ChatSessionsService.create()` และ `ChatGateway.onChatSend()` ผ่าน `ProviderSettingsService`)
 - [x] เพิ่ม endpoint ทดสอบ provider โดยไม่เปิดเผย key (`POST /api/settings/providers/:provider/test`)
 - [x] เพิ่ม key update/delete และ revocation flow
@@ -445,14 +445,14 @@
 
 ### Deployment
 
-- [ ] ใช้ production secrets จาก secret manager
-- [ ] ตรวจ production Docker image ด้วย non-root user
-- [ ] เพิ่ม image health checks
-- [ ] Pin base-image versions/digests ตาม policy
-- [ ] ตั้ง Nginx WebSocket/read timeout
-- [ ] กำหนด resource limits สำหรับ backend/frontend/database
-- [ ] เพิ่ม CI build และ image scan
-- [ ] เพิ่ม deployment และ rollback runbook
+- [ ] ใช้ production secrets จาก secret manager — ข้ามรอบนี้ตามที่มอบหมาย: ต้องเลือก vendor/เครื่องมือ (Vault, AWS Secrets Manager, ฯลฯ) ซึ่งเป็นการตัดสินใจด้าน infra ที่ต้องให้เจ้าของโปรเจกต์ตัดสินใจ ไม่ใช่งาน mechanical
+- [x] ตรวจ production Docker image ด้วย non-root user — backend prod stage เพิ่ม `USER node` (uid 1000 ในตัว `node:24-alpine`); frontend prod stage เปลี่ยนจาก `nginx:alpine` เป็น `nginxinc/nginx-unprivileged:1.29.8-alpine` (รัน worker+master เป็น uid 101 `nginx` ทั้งคู่ ฟัง port 8080 แทน 80) ยืนยันจริงด้วย `docker exec ... whoami`/`id` กับ container ที่รันอยู่จริงทั้งสอง service ผ่าน `docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build` (ดู `docs/deployment.md`); ระหว่างตรวจพบและแก้ bug เดิมที่ไม่เกี่ยวกับ non-root โดยตรงด้วย: prod stage ไม่เคย copy `backend/prisma.config.ts` เข้า image (ทำให้ `prisma migrate deploy` fail) และ `CMD` ชี้ผิดที่ (`dist/main.js` ไม่มีจริง ต้องเป็น `dist/src/main.js`) — แก้ทั้งคู่ใน `backend/Dockerfile` แล้วยืนยันว่า stack รันได้ครบ healthy
+- [x] เพิ่ม image health checks — compose-level (ตาม convention เดิมของ `postgres` ใน `docker-compose.yml`) ไม่ใช่ Dockerfile `HEALTHCHECK`: `backend` เพิ่มใน `docker-compose.yml` (ใช้ port 3000 เดียวกันทั้ง dev/prod), `frontend` เพิ่มใน `docker-compose.prod.yml` เท่านั้นเพราะ internal port ต่างกันระหว่าง dev (`ng serve` port 4200) กับ prod (nginx port 8080); ยืนยันจริงว่าทั้งสอง service ขึ้นเป็น `healthy` ใน `docker compose ps` หลัง deploy จริง
+- [x] Pin base-image versions/digests ตาม policy — `node:24-alpine` (unpinned) → `node:24.18.0-alpine3.24` (ตรวจ digest ตรงกับที่ unpinned tag resolve ในเวลาที่ pin จริง), `nginx:alpine` → `nginxinc/nginx-unprivileged:1.29.8-alpine`; เลือกระดับ version+alpine pin แบบเดียวกับ `postgres:18.4-alpine` ที่มีอยู่แล้ว ไม่ทำ full digest pin (`@sha256:...`) เพราะ over-engineering สำหรับ repo ที่ยังไม่มี formal supply-chain policy ตามที่ประเมินไว้
+- [x] ตั้ง Nginx WebSocket/read timeout — ยืนยันว่า `/ws/` มี `proxy_read_timeout 3600s;` เดิมอยู่ครบ, เพิ่ม `proxy_send_timeout 3600s;` คู่กัน (เดิมมีแค่ read ฝั่งเดียว ซึ่งพลาด timeout ฝั่ง nginx→backend เวลา relay client frame บน connection ที่ idle นาน ๆ); เพิ่ม `proxy_read_timeout 60s;`/`proxy_send_timeout 60s;` ให้ `/api/` อย่างชัดเจน (ค่าเดิมคือ nginx default 60s อยู่แล้ว แต่ pin ไว้ให้เห็นความต่างจาก WS แบบตั้งใจ ไม่ใช่บังเอิญ)
+- [x] กำหนด resource limits สำหรับ backend/frontend/database — เพิ่ม `deploy.resources.limits`/`reservations` ใน `docker-compose.prod.yml` ให้ทั้งสาม service (backend/postgres: 512MB reserved/1GB cap, 0.25/1.0 CPU; frontend: 128MB reserved/256MB cap, 0.1/0.5 CPU) เป็นจุดเริ่มต้นที่ยังไม่ได้ผ่าน load test จริง ต้องปรับตาม production load จริงภายหลัง (บันทึกไว้ใน `docs/deployment.md`); ยืนยันว่า `limits` มีผลจริงแม้ไม่ใช้ Swarm ด้วย `docker inspect --format 'Memory=... NanoCpus=...'` กับ container ที่รันอยู่จริง
+- [ ] เพิ่ม CI build และ image scan — ข้ามรอบนี้ตามที่มอบหมาย: ต้องเลือกเครื่องมือ scan (Trivy, Snyk, ฯลฯ) ซึ่งเป็นการตัดสินใจด้าน infra เช่นเดียวกับ secret manager ข้างต้น
+- [x] เพิ่ม deployment และ rollback runbook — `docs/deployment.md` ครอบคลุม deploy จาก clean checkout (env vars ที่ต้องตั้งจริงก่อน deploy, ลำดับ `postgres`→`migrate`→`backend`→`frontend`), rollback (ไม่มีปุ่ม rollback อัตโนมัติ เป็นการ deploy โค้ดเก่ากลับด้วยมือ) และเตือนตรง ๆ ว่า Prisma migrations ไม่ reversible อัตโนมัติ — repo นี้ยังไม่มี down-migration เขียนไว้เลยสักตัว ถ้า rollback ต้องการ schema downgrade จริงต้องเขียน down-migration เองแล้วตรวจสอบก่อนรัน ไม่ใช่ operation ที่ automate ได้ในตอนนี้
 
 เกณฑ์รับงาน:
 
@@ -485,23 +485,25 @@
 
 ### Integration tests
 
-- [x] Auth endpoints กับ PostgreSQL จริงใน test container
+- [x] Auth endpoints กับ PostgreSQL จริงใน test container (`backend/test/auth.e2e-spec.ts` เพิ่มเติมจาก `app.e2e-spec.ts` เดิม)
 - [x] Session ownership ทุก REST endpoint
-- [ ] Artifact ownership และ revisions
-- [ ] Socket.IO connection/join/send/stop/edit
+- [x] Artifact ownership และ revisions (`backend/test/artifacts-ownership.e2e-spec.ts` — สร้าง artifact ตรงผ่าน Prisma ใต้ session ของ user A แล้วยืนยันว่า user B ได้ 403 ทั้ง list และ revisions endpoint, และ unauthenticated ได้ 401)
+- [~] Socket.IO connection/join/send/stop/edit — connection/join/send/stop ยืนยันผ่าน `socket.io-client` จริงแล้ว (`backend/test/websocket.e2e-spec.ts`, `backend/test/chat-stop.e2e-spec.ts`); `artifact:edit` ยังมีเฉพาะ unit-level coverage เดิม (`chat.gateway.spec.ts`) ไม่ได้เพิ่ม real-socket e2e ให้รอบนี้
 - [x] Cross-user negative tests
-- [ ] Prisma migrations บน empty database
+- [x] Prisma migrations บน empty database (`backend/test/migrations-empty-db.e2e-spec.ts`)
 
 ### Browser E2E
 
-- [ ] Register → login → create chat
-- [ ] Send prompt → เห็น token streaming
-- [ ] Generate code → เห็น Monaco progressive stream
-- [ ] Edit code → revision เพิ่ม
-- [ ] Reload → session/messages/artifacts กลับมาครบ
-- [ ] Stop generation
-- [ ] Logout → login อีก user → socket identity เปลี่ยนถูกต้อง
-- [ ] เปิดหลาย tabs และทดสอบ refresh token race
+Playwright suite ที่ `e2e/` (root-level, ขับทั้ง frontend จริง + backend จริง — ดู `e2e/README.md` สำหรับวิธีรัน) รัน `pnpm --filter e2e test:e2e:browser` ผ่านแล้ว 5 tests, skip 2 tests ที่ต้องมี Ollama จริง:
+
+- [x] Register → login → create chat (`e2e/tests/auth-and-chat.spec.ts`)
+- [ ] Send prompt → เห็น token streaming — **ต้องมี Ollama จริงที่ reachable พร้อม model ที่ pull แล้ว** ไม่มีในสภาพแวดล้อมนี้; เขียนไว้เป็น `test.skip()` ที่ `e2e/tests/ai-dependent.spec.ts` พร้อม comment บอกขั้นตอนรันจริง ไม่ mock WebSocket event เพื่อไม่ให้ผ่านเทียม
+- [ ] Generate code → เห็น Monaco progressive stream — เหตุผลเดียวกับข้างบน (`e2e/tests/ai-dependent.spec.ts`)
+- [ ] Edit code → revision เพิ่ม — ยังไม่ได้ทำรอบนี้ (ต้องมี artifact จริงในหน้าจอก่อนถึงจะแก้ได้ ซึ่งปกติมาจาก AI stream; ยังไม่ได้เขียนเส้นทางสร้าง artifact ผ่าน UI โดยไม่พึ่ง AI)
+- [x] Reload → session/messages/artifacts กลับมาครบ (`e2e/tests/auth-and-chat.spec.ts` — reload จริงด้วย `page.reload()` ยืนยัน session/message กลับมา; ไม่มี artifact ในเคสนี้เพราะไม่มี AI จริงสร้างให้)
+- [x] Stop generation (`e2e/tests/stop-generation.spec.ts` — กดปุ่ม Stop ถ้าทันหน้าต่าง streaming สั้นๆ ของ Ollama unreachable, ยืนยัน composer กลับมาใช้งานได้ปกติไม่ค้างไม่ว่าทางไหน)
+- [x] Logout → login อีก user → socket identity เปลี่ยนถูกต้อง (`e2e/tests/identity-switch.spec.ts` — ยืนยัน user ใหม่ไม่เห็น session/ข้อความของ user เดิมแม้ navigate ตรงไป URL เดิม)
+- [x] เปิดหลาย tabs และทดสอบ refresh token race (`e2e/tests/refresh-token-race.spec.ts` — สอง page ใน browser context เดียวกัน, บังคับ race จริงด้วย network-level gate ที่ `/api/auth/refresh`, ยืนยันว่ามี tab หนึ่งใช้งานได้เสมอและ tab ที่แพ้ race redirect ไป `/login` สะอาดๆ)
 
 ### Quality gate ที่แนะนำ
 
