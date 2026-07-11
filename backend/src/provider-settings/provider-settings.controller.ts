@@ -1,4 +1,12 @@
-import { Body, Controller, Delete, Get, Param, Put } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Post,
+  Put,
+} from '@nestjs/common';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../auth/decorators/current-user.decorator';
 import { UpsertProviderCredentialDto } from './dto/upsert-provider-credential.dto';
@@ -36,5 +44,13 @@ export class ProviderSettingsController {
   ) {
     await this.providerSettingsService.removeApiKey(user.id, provider);
     return { success: true };
+  }
+
+  @Post(':provider/test')
+  testConnection(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('provider') provider: string,
+  ) {
+    return this.providerSettingsService.testConnection(user.id, provider);
   }
 }

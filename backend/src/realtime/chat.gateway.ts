@@ -2,6 +2,7 @@ import {
   ConnectedSocket,
   MessageBody,
   OnGatewayConnection,
+  OnGatewayDisconnect,
   SubscribeMessage,
   WebSocketGateway,
   WebSocketServer,
@@ -12,10 +13,13 @@ import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'crypto';
 import { Server, Socket } from 'socket.io';
-import { ChatSessionsService } from '../chat/chat-sessions.service';
+import {
+  ChatSessionsService,
+  DEFAULT_SESSION_TITLE,
+} from '../chat/chat-sessions.service';
 import { MessagesService } from '../chat/messages.service';
 import { AiProviderFactory } from '../ai/ai-provider.factory';
-import { ActiveStreamRegistry } from './active-stream-registry.service';
+import { ActiveStreamRegistry } from '../chat/active-stream-registry.service';
 import { AiMessage } from '../ai/ai-provider.interface';
 import { ArtifactStreamParser } from '../ai/artifact-stream-parser';
 import {
@@ -23,6 +27,7 @@ import {
   assertArtifactContentBytes,
   normalizeArtifactFilename,
 } from '../artifacts/artifacts.service';
+import { ProviderSettingsService } from '../provider-settings/provider-settings.service';
 import { SessionJoinDto } from './dto/session-join.dto';
 import { SessionLeaveDto } from './dto/session-leave.dto';
 import { ChatStopDto } from './dto/chat-stop.dto';
@@ -40,6 +45,19 @@ const SYSTEM_PROMPT = `When you write code that creates or edits a file, wrap it
 ...code...
 \`\`\`
 Always include the filename after a colon in the fence info string. For short inline snippets that aren't a file, use regular single backticks instead.`;
+
+const AUTO_TITLE_MAX_LENGTH = 40;
+
+/** Derives a short session title from the first user message (trimmed at a word boundary). */
+function deriveSessionTitle(content: string): string | null {
+  const normalized = content.trim().replace(/\s+/g, ' ');
+  if (!normalized) return null;
+  if (normalized.length <= AUTO_TITLE_MAX_LENGTH) return normalized;
+  const truncated = normalized.slice(0, AUTO_TITLE_MAX_LENGTH);
+  const lastSpace = truncated.lastIndexOf(' ');
+  const base = lastSpace > 10 ? truncated.slice(0, lastSpace) : truncated;
+  return `${base}…`;
+}
 
 function artifactContextMessage(
   artifacts: Array<{ filename: string; language: string; content: string }>,
@@ -70,7 +88,7 @@ function artifactContextMessage(
   }),
 )
 @UseFilters(WsValidationFilter)
-export class ChatGateway implements OnGatewayConnection {
+export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
   server!: Server;
 
@@ -84,6 +102,7 @@ export class ChatGateway implements OnGatewayConnection {
     private readonly aiProviderFactory: AiProviderFactory,
     private readonly streamRegistry: ActiveStreamRegistry,
     private readonly artifactsService: ArtifactsService,
+    private readonly providerSettingsService: ProviderSettingsService,
   ) {}
 
   handleConnection(client: Socket) {
@@ -100,6 +119,24 @@ export class ChatGateway implements OnGatewayConnection {
     } catch {
       client.disconnect();
     }
+  }
+
+  /**
+   * Streams are keyed by session (see ActiveStreamRegistry), not by socket:
+   * other tabs/clients in the same session room — or the same user
+   * reconnecting — may still want the in-flight response, so a disconnecting
+   * socket does not abort any stream it started. Every emit in onChatSend
+   * targets the session room via `this.server.to(room).emit(...)`, which
+   * Socket.IO delivers to every remaining room member regardless of this
+   * socket's connection state, so the onChatSend `finally` block
+   * (finalizeAssistantMessage + emit) completes normally even after the
+   * initiating client disconnects mid-stream — see chat.gateway.spec.ts for
+   * a regression test pinning this. This handler exists to satisfy
+   * OnGatewayDisconnect and give future per-socket cleanup a documented
+   * home; there is deliberately no state to tear down today.
+   */
+  handleDisconnect(client: Socket) {
+    this.logger.debug(`Socket disconnected: ${client.id}`);
   }
 
   @SubscribeMessage('session:join')
@@ -172,12 +209,49 @@ export class ChatGateway implements OnGatewayConnection {
       throw new WsException(`AI provider "${providerKey}" is not enabled`);
     }
 
+    // Concurrency policy: at most one stream per session (see the doc
+    // comment on ActiveStreamRegistry for the full rationale). Reject before
+    // any message rows exist so a rejected send leaves no trace.
+    if (this.streamRegistry.hasActiveStream(body.sessionId)) {
+      throw new WsException(
+        'A response is already generating for this session',
+      );
+    }
+
+    // hasProvider() only confirms the provider class is registered; it says
+    // nothing about whether this user has configured a key for it. Resolve
+    // (and require) the key before creating any message rows.
+    let apiKey: string | undefined;
+    if (providerKey !== 'ollama') {
+      const configuredKey =
+        await this.providerSettingsService.getApiKeyForRuntime(
+          userId,
+          providerKey,
+        );
+      if (!configuredKey) {
+        throw new WsException(
+          `Configure an API key for ${providerKey} before starting a session with it`,
+        );
+      }
+      apiKey = configuredKey;
+    }
+
     const userMessage = await this.messagesService.createUserMessage(
       body.sessionId,
       body.content,
     );
     this.server.to(room).emit('chat:message:created', { message: userMessage });
     await this.sessionsService.touch(body.sessionId);
+
+    if (session.title === DEFAULT_SESSION_TITLE) {
+      const derivedTitle = deriveSessionTitle(body.content);
+      if (derivedTitle) {
+        await this.sessionsService.setTitleIfDefault(
+          body.sessionId,
+          derivedTitle,
+        );
+      }
+    }
 
     const assistantMessage =
       await this.messagesService.createPendingAssistantMessage(
@@ -285,11 +359,15 @@ export class ChatGateway implements OnGatewayConnection {
 
     try {
       const provider = this.aiProviderFactory.getProvider(providerKey);
-      controller = this.streamRegistry.register(assistantMessage.id);
+      controller = this.streamRegistry.register(
+        assistantMessage.id,
+        body.sessionId,
+      );
 
       for await (const event of provider.streamChat({
         messages: aiMessages,
         model,
+        apiKey,
         abortSignal: controller.signal,
       })) {
         if (event.type === 'token') {

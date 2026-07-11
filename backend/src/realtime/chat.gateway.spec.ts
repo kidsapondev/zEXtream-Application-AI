@@ -50,6 +50,7 @@ describe('ChatGateway chat:stop', () => {
     {} as never,
     streamRegistry as never,
     {} as never,
+    {} as never,
   );
 
   const client = { data: { userId: 'user-1' } } as unknown as Socket;
@@ -84,6 +85,7 @@ describe('ChatGateway chat:send failure handling', () => {
   const sessionsService = {
     getOwned: jest.fn(),
     touch: jest.fn(),
+    setTitleIfDefault: jest.fn(),
   };
   const messagesService = {
     createUserMessage: jest.fn(),
@@ -98,10 +100,14 @@ describe('ChatGateway chat:send failure handling', () => {
   const streamRegistry = {
     register: jest.fn(),
     release: jest.fn(),
+    hasActiveStream: jest.fn(),
   };
   const artifactsService = {
     createRevision: jest.fn(),
     listLatestForSession: jest.fn(),
+  };
+  const providerSettingsService = {
+    getApiKeyForRuntime: jest.fn(),
   };
   const emit = jest.fn<(event: string, payload: unknown) => void>();
 
@@ -113,6 +119,7 @@ describe('ChatGateway chat:send failure handling', () => {
     aiProviderFactory as never,
     streamRegistry as never,
     artifactsService as never,
+    providerSettingsService as never,
   );
 
   gateway.server = { to: jest.fn(() => ({ emit })) } as never;
@@ -120,10 +127,13 @@ describe('ChatGateway chat:send failure handling', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     sessionsService.getOwned.mockResolvedValue({
+      title: 'New Chat',
       defaultProvider: 'ollama',
       defaultModel: 'test-model',
     });
     sessionsService.touch.mockResolvedValue(undefined);
+    sessionsService.setTitleIfDefault.mockResolvedValue(undefined);
+    streamRegistry.hasActiveStream.mockReturnValue(false);
     messagesService.createUserMessage.mockResolvedValue({
       id: 'user-message',
       sessionId: 'session-1',
@@ -279,12 +289,173 @@ describe('ChatGateway chat:send failure handling', () => {
       validateMessageBody(ChatSendDto, {
         sessionId: VALID_SESSION_ID,
         content: 'hello',
-        provider: 'claude',
+        provider: 'gemini' as never,
       }),
     ).rejects.toBeInstanceOf(BadRequestException);
 
     expect(sessionsService.getOwned).not.toHaveBeenCalled();
     expect(messagesService.createUserMessage).not.toHaveBeenCalled();
+  });
+
+  it('rejects a concurrent send when the session already has an active stream', async () => {
+    aiProviderFactory.hasProvider.mockReturnValue(true);
+    streamRegistry.hasActiveStream.mockReturnValue(true);
+
+    await expect(
+      gateway.onChatSend(client, {
+        sessionId: 'session-1',
+        content: 'hello',
+      }),
+    ).rejects.toBeInstanceOf(WsException);
+
+    expect(streamRegistry.hasActiveStream).toHaveBeenCalledWith('session-1');
+    expect(messagesService.createUserMessage).not.toHaveBeenCalled();
+    expect(
+      messagesService.createPendingAssistantMessage,
+    ).not.toHaveBeenCalled();
+  });
+
+  it('rejects claude/openai sends when the user has no configured API key, before persisting the prompt', async () => {
+    aiProviderFactory.hasProvider.mockReturnValue(true);
+    providerSettingsService.getApiKeyForRuntime.mockResolvedValue(null);
+
+    await expect(
+      gateway.onChatSend(client, {
+        sessionId: 'session-1',
+        content: 'hello',
+        provider: 'claude',
+      }),
+    ).rejects.toBeInstanceOf(WsException);
+
+    expect(providerSettingsService.getApiKeyForRuntime).toHaveBeenCalledWith(
+      'user-1',
+      'claude',
+    );
+    expect(messagesService.createUserMessage).not.toHaveBeenCalled();
+  });
+
+  it('passes the resolved API key to non-ollama providers', async () => {
+    aiProviderFactory.hasProvider.mockReturnValue(true);
+    providerSettingsService.getApiKeyForRuntime.mockResolvedValue(
+      'decrypted-key',
+    );
+    const streamChat = jest.fn(function* () {
+      yield { type: 'done' as const, finishReason: 'stop' as const };
+    });
+    aiProviderFactory.getProvider.mockReturnValue({ streamChat });
+    streamRegistry.register.mockReturnValue(new AbortController());
+
+    await gateway.onChatSend(client, {
+      sessionId: 'session-1',
+      content: 'hello',
+      provider: 'claude',
+    });
+
+    expect(streamChat).toHaveBeenCalledWith(
+      expect.objectContaining({ apiKey: 'decrypted-key' }),
+    );
+  });
+
+  it('does not resolve an API key for ollama sends', async () => {
+    aiProviderFactory.hasProvider.mockReturnValue(true);
+    const streamChat = jest.fn(function* () {
+      yield { type: 'done' as const, finishReason: 'stop' as const };
+    });
+    aiProviderFactory.getProvider.mockReturnValue({ streamChat });
+    streamRegistry.register.mockReturnValue(new AbortController());
+
+    await gateway.onChatSend(client, {
+      sessionId: 'session-1',
+      content: 'hello',
+    });
+
+    expect(providerSettingsService.getApiKeyForRuntime).not.toHaveBeenCalled();
+    expect(streamChat).toHaveBeenCalledWith(
+      expect.objectContaining({ apiKey: undefined }),
+    );
+  });
+
+  it('derives and persists a session title from the first message when the title is still the default', async () => {
+    aiProviderFactory.hasProvider.mockReturnValue(true);
+    aiProviderFactory.getProvider.mockReturnValue({
+      *streamChat() {
+        yield { type: 'done' as const, finishReason: 'stop' as const };
+      },
+    });
+    streamRegistry.register.mockReturnValue(new AbortController());
+
+    await gateway.onChatSend(client, {
+      sessionId: 'session-1',
+      content: '  how do   I center a div in CSS using flexbox today?  ',
+    });
+
+    expect(sessionsService.setTitleIfDefault).toHaveBeenCalledWith(
+      'session-1',
+      'how do I center a div in CSS using…',
+    );
+  });
+
+  it('does not touch the title when the session already has a custom title', async () => {
+    sessionsService.getOwned.mockResolvedValue({
+      title: 'My custom title',
+      defaultProvider: 'ollama',
+      defaultModel: 'test-model',
+    });
+    aiProviderFactory.hasProvider.mockReturnValue(true);
+    aiProviderFactory.getProvider.mockReturnValue({
+      *streamChat() {
+        yield { type: 'done' as const, finishReason: 'stop' as const };
+      },
+    });
+    streamRegistry.register.mockReturnValue(new AbortController());
+
+    await gateway.onChatSend(client, {
+      sessionId: 'session-1',
+      content: 'hello',
+    });
+
+    expect(sessionsService.setTitleIfDefault).not.toHaveBeenCalled();
+  });
+
+  it('finalizes the assistant message even if the initiating client disconnects mid-stream', async () => {
+    aiProviderFactory.hasProvider.mockReturnValue(true);
+    const disconnectingClient = {
+      data: { userId: 'user-1' },
+      connected: true,
+    } as unknown as Socket & { connected: boolean };
+    aiProviderFactory.getProvider.mockReturnValue({
+      *streamChat() {
+        yield { type: 'token' as const, delta: 'hello ' };
+        // Simulate the socket that initiated the send dropping mid-stream.
+        // ChatGateway must not consult `client` again after this point —
+        // every emit goes through `this.server.to(room)`, not `client`.
+        disconnectingClient.connected = false;
+        yield { type: 'token' as const, delta: 'world' };
+        yield { type: 'done' as const, finishReason: 'stop' as const };
+      },
+    });
+    streamRegistry.register.mockReturnValue(new AbortController());
+
+    await gateway.onChatSend(disconnectingClient, {
+      sessionId: 'session-1',
+      content: 'hello',
+    });
+
+    expect(disconnectingClient.connected).toBe(false);
+    expect(messagesService.finalizeAssistantMessage).toHaveBeenCalledWith(
+      'assistant-message',
+      'hello world',
+      'complete',
+      undefined,
+    );
+    expect(emit).toHaveBeenCalledWith('chat:message:updated', {
+      message: {
+        id: 'assistant-message',
+        content: 'hello world',
+        streamingStatus: 'complete',
+        errorMessage: undefined,
+      },
+    });
   });
 
   it('rejects a missing sessionId before any service is called', async () => {
@@ -387,6 +558,7 @@ describe('ChatGateway auth is enforced by the gateway itself, independent of the
     {} as never,
     streamRegistry as never,
     artifactsService as never,
+    {} as never,
   );
 
   const unauthenticatedClient = { data: {} } as unknown as Socket;
