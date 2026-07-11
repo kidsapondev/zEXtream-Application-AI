@@ -235,7 +235,7 @@ describe('ChatGateway chat:send failure handling', () => {
   it('fails an oversized AI artifact without persisting a partial revision', async () => {
     aiProviderFactory.hasProvider.mockReturnValue(true);
     aiProviderFactory.getProvider.mockReturnValue({
-      async *streamChat() {
+      *streamChat() {
         yield {
           type: 'token' as const,
           delta: `\`\`\`typescript:src/too-large.ts\n${'a'.repeat(
@@ -264,7 +264,7 @@ describe('ChatGateway chat:send failure handling', () => {
   it('persists a partial artifact and finalizes as stopped when generation is aborted', async () => {
     aiProviderFactory.hasProvider.mockReturnValue(true);
     aiProviderFactory.getProvider.mockReturnValue({
-      async *streamChat() {
+      *streamChat() {
         yield {
           type: 'token' as const,
           delta: '```typescript:src/partial.ts\nexport const partial = true;',

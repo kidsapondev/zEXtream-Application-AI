@@ -473,7 +473,7 @@
 - [x] Frontend unit smoke test ผ่าน 1 test
 - [x] Backend build ผ่าน
 - [x] Frontend build ผ่าน
-- [~] Backend ESLint ทั้ง repository ยังไม่ผ่านจาก baseline เดิม; ไฟล์ที่แก้ในรอบนี้ผ่าน lint แล้ว
+- [x] Backend ESLint ทั้ง repository ผ่านแล้ว (`npx eslint .` → 0 errors, 0 warnings) — เดิมรายงาน 170 problems แต่ ~146 เป็น false positive จาก `dist/` (build output ที่ eslint ไม่เคยถูกกันไว้ ทำให้ parse ไฟล์ compiled ที่ไม่อยู่ใน tsconfig rootDir ไม่ได้) แก้โดยเพิ่ม `dist/**` เข้า `ignores` ใน `eslint.config.mjs`; อีก 24 ปัญหาที่เหลือเป็นของจริงในซอร์สโค้ด แก้ครบแล้ว — ส่วนใหญ่เป็น prettier formatting (`--fix` อัตโนมัติ) และ type-safety จริง 8 จุด: `current-user.decorator.ts`/`jwt-refresh.strategy.ts` เคย unsafe-assign `any` จาก `getRequest()`/`req.cookies` ที่ไม่มี type แก้ด้วยการ type ตัวแปรกลาง/narrow ด้วย `typeof` แทนที่จะ trust `any` เดิม, `artifacts.service.spec.ts` 2 จุด restructure assertion จาก object-literal property ที่มี `expect.objectContaining()` ฝังอยู่ (ซึ่ง `no-unsafe-assignment` มองว่าเป็น any-assignment) เป็นการ cast `mock.calls[0]` ด้วย `as` แล้ว assert field ตรง ๆ, `chat.gateway.spec.ts` 2 จุดเป็น async generator mock ที่ไม่มี `await` จริงข้างใน แก้โดยถอด `async` ออก (เหลือเป็น sync generator ธรรมดา ซึ่ง `for await...of` ฝั่ง consumer ใช้งานได้เหมือนเดิมอยู่แล้ว) — ระหว่างแก้เจอว่า generator ตัวอื่นที่ยังมี `await` จริงถูก script เผลอแก้ไปด้วย (`replace_all`) ต้องแก้กลับเฉพาะตัวนั้น ตรวจสอบด้วย `tsc --noEmit` ยืนยันว่าไม่มีที่ไหนพังหลงเหลือ; build + unit test (162/162) + e2e (53/53) ผ่านหมดหลังแก้
 - [~] Test suite ยังไม่ครอบคลุม business logic หลัก แต่มี auth/stream/socket security coverage เพิ่มแล้ว
 
 ### Unit tests ที่ควรเพิ่มก่อน

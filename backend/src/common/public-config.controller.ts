@@ -32,13 +32,13 @@ export class PublicConfigController {
     // this fix, GET /api/config returned {"sentryDsn":"",...} instead of
     // {"sentryDsn":null,...} against the real docker-compose stack).
     const sentryDsn = this.configService.get<string>('SENTRY_DSN');
-    const sentryEnvironment = this.configService.get<string>(
-      'SENTRY_ENVIRONMENT',
-    );
+    const sentryEnvironment =
+      this.configService.get<string>('SENTRY_ENVIRONMENT');
     return {
       sentryDsn: sentryDsn || null,
       sentryEnvironment:
-        sentryEnvironment || this.configService.get<string>('NODE_ENV', 'development'),
+        sentryEnvironment ||
+        this.configService.get<string>('NODE_ENV', 'development'),
     };
   }
 }

@@ -10,11 +10,19 @@ export interface RefreshTokenPayload {
 }
 
 function extractFromCookie(req: Request): string | null {
-  return req?.cookies?.['refresh_token'] ?? null;
+  // req.cookies is typed via @types/cookie-parser's index signature, which TS still
+  // treats as effectively `any` at the element-access site - narrow explicitly rather
+  // than trusting it, matching the same defensive cast auth.controller.ts already uses
+  // for this same cookie.
+  const token: unknown = req?.cookies?.['refresh_token'];
+  return typeof token === 'string' ? token : null;
 }
 
 @Injectable()
-export class JwtRefreshStrategy extends PassportStrategy(Strategy, 'jwt-refresh') {
+export class JwtRefreshStrategy extends PassportStrategy(
+  Strategy,
+  'jwt-refresh',
+) {
   constructor(configService: ConfigService) {
     super({
       jwtFromRequest: extractFromCookie,

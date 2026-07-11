@@ -173,9 +173,10 @@ describe('ArtifactsService', () => {
       where: { sessionId: 'session-1', filename: 'src/app.ts' },
       orderBy: { revision: 'desc' },
     });
-    expect(transaction.codeArtifact.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({ filename: 'src/app.ts' }),
-    });
+    const createCall = transaction.codeArtifact.create.mock.calls[0] as [
+      { data: { filename: string } },
+    ];
+    expect(createCall[0].data.filename).toBe('src/app.ts');
   });
 
   it('retries after a revision unique conflict and uses the new latest parent', async () => {
@@ -222,11 +223,10 @@ describe('ArtifactsService', () => {
     });
 
     expect(result).toEqual({ id: 'artifact-2', revision: 2 });
-    expect(secondTransaction.codeArtifact.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        revision: 2,
-        parentArtifactId: 'artifact-1',
-      }),
-    });
+    const createCall = secondTransaction.codeArtifact.create.mock.calls[0] as [
+      { data: { revision: number; parentArtifactId: string } },
+    ];
+    expect(createCall[0].data.revision).toBe(2);
+    expect(createCall[0].data.parentArtifactId).toBe('artifact-1');
   });
 });
