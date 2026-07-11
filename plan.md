@@ -19,12 +19,12 @@
 | ------- | ------------------------------------------- | ----- | --------------------------------------------------------- |
 | Phase 0 | Repository และ project foundation           | `[x]` | Monorepo, pnpm, Docker และเอกสารหลักพร้อมแล้ว             |
 | Phase 1 | PostgreSQL และ Prisma                       | `[x]` | Schema และ migrations หลักพร้อมใช้งาน                     |
-| Phase 2 | Authentication และ users                    | `[x]` | Auth P0 ทั้งหมดปิดแล้ว (atomic rotation, timing-safe login, rate limiting, trusted proxy); เหลือเฉพาะ integration test coverage เพิ่มเติม |
-| Phase 3 | Angular shell และ design system             | `[x]` | Login/register/layout, design system, session management UI (rename/archive/delete), toasts, responsive layout, accessibility pass เสร็จแล้ว |
-| Phase 4 | Chat session และ Ollama streaming           | `[x]` | Backend streaming correctness (concurrency/timeout/disconnect/malformed line) และ frontend state race (stale response/dedup/scroll/connection banner) เสร็จแล้ว; เหลือ WS integration test suite |
-| Phase 5 | Code artifacts และ Monaco Editor            | `[~]` | Source และ Docker build ผ่าน, live-verified end-to-end; เหลือ artifact ownership integration tests |
-| Phase 6 | Claude/OpenAI และ provider settings         | `[~]` | Claude/OpenAI providers, registry, capability metadata, per-user gating, connection-test endpoint implemented; เหลือ model-selector UI และ provider integration tests กับ mocked upstream |
-| Phase 7 | Security hardening และ production readiness | `[~]` | Helmet/CSP, CORS allowlist, audit log, structured logging, health checks, metrics, backup/restore (ทดสอบจริงแล้ว) เสร็จ; เหลือ WS rate limiting, deployment section (ต้องตัดสินใจ infra) |
+| Phase 2 | Authentication และ users                    | `[x]` | Auth P0 ทั้งหมดปิดแล้ว รวมทั้ง integration test suite เต็มรูปแบบกับ PostgreSQL จริง |
+| Phase 3 | Angular shell และ design system             | `[x]` | Login/register/layout, design system, session management UI, model-selector, toasts, responsive layout, accessibility pass เสร็จแล้ว |
+| Phase 4 | Chat session และ Ollama streaming           | `[x]` | Backend streaming correctness, frontend state race และ WebSocket integration test suite (real socket.io-client) เสร็จแล้ว |
+| Phase 5 | Code artifacts และ Monaco Editor            | `[~]` | Source, Docker build และ artifact ownership integration tests ผ่านหมด; เหลือ AI-dependent E2E (streaming/Monaco progressive) ที่ต้องมี Ollama จริง และ edit-code-เพิ่ม-revision ผ่าน UI โดยไม่พึ่ง AI |
+| Phase 6 | Claude/OpenAI และ provider settings         | `[~]` | Provider configuration model, providers ทั้งสาม, capability metadata, per-user gating, connection-test endpoint และ model-selector UI ครบแล้ว; เหลือ error-mapping tests กับ mocked upstream ที่ครอบคลุมกว่านี้ |
+| Phase 7 | Security hardening และ production readiness | `[~]` | Helmet/CSP, CORS allowlist, rate limiting (REST+WS), audit log, structured logging, health checks, metrics, graceful shutdown/stream draining, backup/restore, deployment hardening (non-root images, health checks, resource limits) เสร็จหมด; เหลือเฉพาะรายการที่ต้องตัดสินใจ infra (secret manager, image scan, error-reporting vendor, license) |
 
 ## สถานะ Repository
 
