@@ -15,7 +15,9 @@
 
   <div main>
     <ds-page-header title="AI providers">
-      <span actions class="page-subtitle">Keys are encrypted before storage and are never shown again.</span>
+      <span actions class="page-subtitle"
+        >Keys are encrypted before storage and are never shown again.</span
+      >
     </ds-page-header>
 
     @if (error(); as message) {
@@ -32,7 +34,15 @@
               <div class="provider-card__head">
                 <div class="provider-card__icon" aria-hidden="true">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-                    <rect x="3" y="11" width="18" height="10" rx="2" stroke="currentColor" stroke-width="1.5" />
+                    <rect
+                      x="3"
+                      y="11"
+                      width="18"
+                      height="10"
+                      rx="2"
+                      stroke="currentColor"
+                      stroke-width="1.5"
+                    />
                     <path d="M7 11V7a5 5 0 0 1 10 0v4" stroke="currentColor" stroke-width="1.5" />
                   </svg>
                 </div>
@@ -69,9 +79,23 @@
                   @if (setting.configured) {
                     <button
                       type="button"
+                      class="btn"
+                      (click)="testConnection(setting)"
+                      [disabled]="
+                        savingProvider() === setting.provider ||
+                        testingProvider() === setting.provider
+                      "
+                    >
+                      {{ testingProvider() === setting.provider ? 'Testing…' : 'Test connection' }}
+                    </button>
+                    <button
+                      type="button"
                       class="btn btn--danger"
                       (click)="remove(setting)"
-                      [disabled]="savingProvider() === setting.provider"
+                      [disabled]="
+                        savingProvider() === setting.provider ||
+                        testingProvider() === setting.provider
+                      "
                     >
                       Remove key
                     </button>

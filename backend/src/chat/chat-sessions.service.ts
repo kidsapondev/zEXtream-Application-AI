@@ -83,7 +83,16 @@ export class ChatSessionsService {
   }
 
   async update(userId: string, sessionId: string, dto: UpdateSessionDto) {
-    await this.getOwned(userId, sessionId);
+    const session = await this.getOwned(userId, sessionId);
+    // A key could have been removed since the session was created. Re-check
+    // when the user changes either part of its runtime selection, while still
+    // allowing title/archive updates on historical sessions.
+    if (dto.defaultProvider !== undefined || dto.defaultModel !== undefined) {
+      await this.assertProviderConfigured(
+        userId,
+        dto.defaultProvider ?? session.defaultProvider,
+      );
+    }
     return this.prisma.chatSession.update({
       where: { id: sessionId },
       data: dto,

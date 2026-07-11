@@ -10,7 +10,9 @@
       (click)="$event.stopPropagation()"
       (keydown.escape)="cancelled.emit()"
     >
-      <h2 id="new-session-dialog-title" class="new-session-dialog__title">Start a new chat</h2>
+      <h2 id="new-session-dialog-title" class="new-session-dialog__title">
+        {{ editing() ? 'Change chat provider' : 'Start a new chat' }}
+      </h2>
 
       <div class="new-session-dialog__field">
         <span class="new-session-dialog__label">Provider</span>
@@ -55,8 +57,13 @@
 
       <div class="new-session-dialog__actions">
         <button type="button" class="btn" (click)="cancelled.emit()">Cancel</button>
-        <button type="button" class="btn btn--primary" [disabled]="!canCreate()" (click)="confirm()">
-          Start chat
+        <button
+          type="button"
+          class="btn btn--primary"
+          [disabled]="!canCreate()"
+          (click)="confirm()"
+        >
+          {{ editing() ? 'Save provider' : 'Start chat' }}
         </button>
       </div>
     </div>

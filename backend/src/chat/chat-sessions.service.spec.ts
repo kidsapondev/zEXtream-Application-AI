@@ -120,6 +120,51 @@ describe('ChatSessionsService', () => {
     });
   });
 
+  describe('update', () => {
+    it('requires a currently configured key when changing a session provider', async () => {
+      prisma.chatSession.findUnique.mockResolvedValue({
+        id: 'session-1',
+        userId: 'user-1',
+        defaultProvider: 'ollama',
+        defaultModel: 'llama3',
+      });
+      providerSettingsService.hasApiKey.mockResolvedValue(false);
+
+      await expect(
+        service.update('user-1', 'session-1', {
+          defaultProvider: 'openai',
+          defaultModel: 'gpt-5.1',
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+
+      expect(prisma.chatSession.update).not.toHaveBeenCalled();
+    });
+
+    it('updates model-only changes after confirming the existing provider remains configured', async () => {
+      prisma.chatSession.findUnique.mockResolvedValue({
+        id: 'session-1',
+        userId: 'user-1',
+        defaultProvider: 'claude',
+        defaultModel: 'claude-haiku-4-5',
+      });
+      providerSettingsService.hasApiKey.mockResolvedValue(true);
+      prisma.chatSession.update.mockResolvedValue({ id: 'session-1' });
+
+      await service.update('user-1', 'session-1', {
+        defaultModel: 'claude-sonnet-5',
+      });
+
+      expect(providerSettingsService.hasApiKey).toHaveBeenCalledWith(
+        'user-1',
+        'claude',
+      );
+      expect(prisma.chatSession.update).toHaveBeenCalledWith({
+        where: { id: 'session-1' },
+        data: { defaultModel: 'claude-sonnet-5' },
+      });
+    });
+  });
+
   describe('setTitleIfDefault', () => {
     it('only updates rows that still have the default title', async () => {
       await service.setTitleIfDefault('session-1', 'Derived title');

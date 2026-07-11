@@ -1,4 +1,11 @@
-import { IsBoolean, IsOptional, IsString, MaxLength } from 'class-validator';
+import {
+  IsBoolean,
+  IsIn,
+  IsOptional,
+  IsString,
+  MaxLength,
+} from 'class-validator';
+import { ENABLED_PROVIDERS } from './create-session.dto';
 
 export class UpdateSessionDto {
   @IsOptional()
@@ -9,4 +16,13 @@ export class UpdateSessionDto {
   @IsOptional()
   @IsBoolean()
   isArchived?: boolean;
+
+  @IsOptional()
+  @IsIn(ENABLED_PROVIDERS)
+  defaultProvider?: (typeof ENABLED_PROVIDERS)[number];
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  defaultModel?: string;
 }

@@ -1,4 +1,13 @@
-import { Component, ElementRef, afterRenderEffect, inject, input, signal, viewChild } from '@angular/core';
+import {
+  Component,
+  ElementRef,
+  afterRenderEffect,
+  inject,
+  input,
+  output,
+  signal,
+  viewChild,
+} from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
 import type { ChatSessionDto } from '@app/shared-types';
@@ -15,6 +24,7 @@ import { SessionListStore } from '../session-list.store';
 export class SessionListItemComponent {
   readonly session = input.required<ChatSessionDto>();
   readonly active = input(false);
+  readonly changeProvider = output<ChatSessionDto>();
 
   private readonly sessionListStore = inject(SessionListStore);
   private readonly toastService = inject(ToastService);
@@ -45,6 +55,12 @@ export class SessionListItemComponent {
 
   cancelRename(): void {
     this.editing.set(false);
+  }
+
+  requestProviderChange(event: Event): void {
+    event.preventDefault();
+    event.stopPropagation();
+    this.changeProvider.emit(this.session());
   }
 
   async commitRename(): Promise<void> {

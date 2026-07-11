@@ -19,9 +19,11 @@ describe('ProviderSettingsService', () => {
     decrypt: jest.fn(() => 'decrypted-key'),
     version: 1,
   };
+  const auditLog = { record: jest.fn() };
   const service = new ProviderSettingsService(
     prisma as never,
     encryption as never,
+    auditLog as never,
   );
 
   beforeEach(() => {
@@ -68,6 +70,26 @@ describe('ProviderSettingsService', () => {
       userId_provider: { userId: 'user-1', provider: 'openai' },
     });
     expect(input.create.encryptedApiKey).toBeInstanceOf(Uint8Array);
+    expect(auditLog.record).toHaveBeenCalledWith('provider_credential.upsert', {
+      userId: 'user-1',
+      provider: 'openai',
+      outcome: 'success',
+    });
+  });
+
+  it('records a credential removal without including the key value', async () => {
+    prisma.providerCredential.deleteMany.mockResolvedValue({ count: 1 });
+
+    await service.removeApiKey('user-1', 'claude');
+
+    expect(auditLog.record).toHaveBeenCalledWith('provider_credential.remove', {
+      userId: 'user-1',
+      provider: 'claude',
+      outcome: 'success',
+    });
+    expect(JSON.stringify(auditLog.record.mock.calls)).not.toContain(
+      'decrypted-key',
+    );
   });
 
   it('rejects keys for providers that do not use a credential', async () => {

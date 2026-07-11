@@ -11,7 +11,11 @@
       <p class="hint">No chats yet — press + to start one.</p>
     }
     @for (session of sessionListStore.sessions(); track session.id) {
-      <app-session-list-item [session]="session" [active]="session.id === sessionId()" />
+      <app-session-list-item
+        [session]="session"
+        [active]="session.id === sessionId()"
+        (changeProvider)="onChangeSessionProvider($event)"
+      />
     }
   </div>
 
@@ -35,7 +39,10 @@
     }
 
     @if (sessionId(); as id) {
-      <div class="workspace-split" [class.workspace-split--with-editor]="artifactStore.hasArtifacts()">
+      <div
+        class="workspace-split"
+        [class.workspace-split--with-editor]="artifactStore.hasArtifacts()"
+      >
         <div class="workspace-split__chat">
           <app-chat-thread [sessionId]="id" />
         </div>
@@ -54,6 +61,15 @@
 <app-new-session-dialog
   [open]="showNewSessionDialog()"
   [providers]="providerCatalogStore.configuredProviders()"
+  [initialChoice]="
+    sessionBeingReconfigured()
+      ? {
+          provider: sessionBeingReconfigured()!.defaultProvider,
+          model: sessionBeingReconfigured()!.defaultModel,
+        }
+      : null
+  "
+  [editing]="sessionBeingReconfigured() !== null"
   (created)="onCreateSession($event)"
   (cancelled)="onCancelNewSession()"
 />

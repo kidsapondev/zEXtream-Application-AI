@@ -1,7 +1,20 @@
-import { Component, ElementRef, afterRenderEffect, computed, effect, input, output, signal, viewChild } from '@angular/core';
+import {
+  Component,
+  ElementRef,
+  afterRenderEffect,
+  computed,
+  effect,
+  input,
+  output,
+  signal,
+  viewChild,
+} from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import type { AiProviderKey, ProviderSettingDto } from '@app/shared-types';
-import { SegmentedTabsComponent, type SegmentedTabOption } from '../../../design-system/segmented-tabs/segmented-tabs.component';
+import {
+  SegmentedTabsComponent,
+  type SegmentedTabOption,
+} from '../../../design-system/segmented-tabs/segmented-tabs.component';
 
 /** A handful of common local model names, offered only as convenience suggestions — Ollama has no fixed catalog, so free text is always allowed. */
 const COMMON_OLLAMA_MODELS = [
@@ -34,6 +47,8 @@ const DEFAULT_OLLAMA_MODEL = 'qwen2.5-coder:14b';
 })
 export class NewSessionDialogComponent {
   readonly open = input(false);
+  readonly initialChoice = input<{ provider: AiProviderKey; model: string } | null>(null);
+  readonly editing = input(false);
   /** Only providers the current user can actually start a session with (`configured: true`). */
   readonly providers = input<ProviderSettingDto[]>([]);
 
@@ -72,11 +87,23 @@ export class NewSessionDialogComponent {
     effect(() => {
       if (!this.open()) return;
       const providers = this.providers();
-      const preferred = providers.find((p) => p.provider === 'ollama') ?? providers[0];
+      const initial = this.initialChoice();
+      const preferred =
+        providers.find((p) => p.provider === initial?.provider) ??
+        providers.find((p) => p.provider === 'ollama') ??
+        providers[0];
       if (!preferred) return;
       this.selectedProvider.set(preferred.provider);
-      this.customOllamaModel.set(DEFAULT_OLLAMA_MODEL);
-      this.selectedModel.set(preferred.models[0] ?? '');
+      this.customOllamaModel.set(
+        preferred.provider === 'ollama'
+          ? (initial?.model ?? DEFAULT_OLLAMA_MODEL)
+          : DEFAULT_OLLAMA_MODEL,
+      );
+      this.selectedModel.set(
+        preferred.models.includes(initial?.model ?? '')
+          ? (initial?.model ?? '')
+          : (preferred.models[0] ?? ''),
+      );
     });
 
     // Keep the model selection valid whenever the provider changes.

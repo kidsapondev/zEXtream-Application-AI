@@ -1,7 +1,7 @@
 import { Component, effect, inject, input, signal } from '@angular/core';
 import { HttpErrorResponse } from '@angular/common/http';
 import { Router } from '@angular/router';
-import type { AiProviderKey } from '@app/shared-types';
+import type { AiProviderKey, ChatSessionDto } from '@app/shared-types';
 import { AppShellComponent } from '../../design-system/app-shell/app-shell.component';
 import { AuthStore } from '../../core/auth.store';
 import { SocketService } from '../../core/socket.service';
@@ -40,6 +40,7 @@ export class ChatWorkspaceComponent {
   private readonly router = inject(Router);
 
   protected readonly showNewSessionDialog = signal(false);
+  protected readonly sessionBeingReconfigured = signal<ChatSessionDto | null>(null);
 
   constructor() {
     effect(() => {
@@ -65,11 +66,36 @@ export class ChatWorkspaceComponent {
   }
 
   async onCreateSession(choice: { provider: AiProviderKey; model: string }) {
+    const session = this.sessionBeingReconfigured();
+    if (session) {
+      try {
+        await this.sessionListStore.updateProviderAndModel(
+          session.id,
+          choice.provider,
+          choice.model,
+        );
+        this.toastService.show('Chat provider updated.', 'success');
+        this.onCancelNewSession();
+      } catch (err) {
+        const message =
+          err instanceof HttpErrorResponse && typeof err.error?.message === 'string'
+            ? err.error.message
+            : 'Could not update this chat provider. Please try again.';
+        this.toastService.show(message, 'error');
+      }
+      return;
+    }
     await this.createSession(choice.provider, choice.model);
   }
 
   onCancelNewSession() {
     this.showNewSessionDialog.set(false);
+    this.sessionBeingReconfigured.set(null);
+  }
+
+  onChangeSessionProvider(session: ChatSessionDto): void {
+    this.sessionBeingReconfigured.set(session);
+    this.showNewSessionDialog.set(true);
   }
 
   private async createSession(provider: AiProviderKey, model: string) {

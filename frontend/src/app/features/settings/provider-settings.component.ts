@@ -11,6 +11,7 @@ import { BadgePillComponent } from '../../design-system/badge-pill/badge-pill.co
 import { AuthStore } from '../../core/auth.store';
 import { ToastService } from '../../core/toast.service';
 import { SessionListStore } from '../chat/session-list.store';
+import { ProviderCatalogStore } from '../chat/provider-catalog.store';
 
 const DEFAULT_OLLAMA_MODEL = 'qwen2.5-coder:14b';
 
@@ -32,12 +33,14 @@ export class ProviderSettingsComponent {
   private readonly router = inject(Router);
   protected readonly authStore = inject(AuthStore);
   private readonly sessionListStore = inject(SessionListStore);
+  private readonly providerCatalogStore = inject(ProviderCatalogStore);
   private readonly toastService = inject(ToastService);
 
   readonly settings = signal<ProviderSettingDto[]>([]);
   readonly apiKeys = signal<Record<string, string>>({});
   readonly loading = signal(true);
   readonly savingProvider = signal<string | null>(null);
+  readonly testingProvider = signal<string | null>(null);
   readonly error = signal<string | null>(null);
 
   constructor() {
@@ -100,6 +103,7 @@ export class ProviderSettingsComponent {
       );
       this.setKey(setting.provider, '');
       await this.load();
+      this.providerCatalogStore.reload();
       this.toastService.show(`${setting.provider} key saved.`, 'success');
     } catch {
       this.error.set(`Could not save ${setting.provider} credentials.`);
@@ -115,12 +119,39 @@ export class ProviderSettingsComponent {
     try {
       await firstValueFrom(this.http.delete(`/api/settings/providers/${setting.provider}`));
       await this.load();
+      this.providerCatalogStore.reload();
       this.toastService.show(`${setting.provider} key removed.`, 'success');
     } catch {
       this.error.set(`Could not remove ${setting.provider} credentials.`);
       this.toastService.show(`Could not remove ${setting.provider} credentials.`, 'error');
     } finally {
       this.savingProvider.set(null);
+    }
+  }
+
+  async testConnection(setting: ProviderSettingDto): Promise<void> {
+    this.testingProvider.set(setting.provider);
+    this.error.set(null);
+    try {
+      const result = await firstValueFrom(
+        this.http.post<{ success: boolean; message?: string }>(
+          `/api/settings/providers/${setting.provider}/test`,
+          {},
+        ),
+      );
+      if (result.success) {
+        this.toastService.show(`${setting.provider} connection verified.`, 'success');
+      } else {
+        const message = result.message ?? `Could not connect to ${setting.provider}.`;
+        this.error.set(message);
+        this.toastService.show(message, 'error');
+      }
+    } catch {
+      const message = `Could not test ${setting.provider} connection.`;
+      this.error.set(message);
+      this.toastService.show(message, 'error');
+    } finally {
+      this.testingProvider.set(null);
     }
   }
 }

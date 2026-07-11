@@ -16,7 +16,10 @@ export class SessionListStore {
   readonly sessions = computed(() => this.sessionsResource.value() ?? []);
   readonly isLoading = this.sessionsResource.isLoading;
 
-  async createSession(defaultProvider: AiProviderKey, defaultModel: string): Promise<ChatSessionDto> {
+  async createSession(
+    defaultProvider: AiProviderKey,
+    defaultModel: string,
+  ): Promise<ChatSessionDto> {
     const session = await firstValueFrom(
       this.http.post<ChatSessionDto>('/api/chat/sessions', { defaultProvider, defaultModel }),
     );
@@ -32,6 +35,20 @@ export class SessionListStore {
   /** Archiving a session hides it from `listForUser()` — the REST layer already filters `isArchived: false`. */
   async archiveSession(id: string): Promise<void> {
     await firstValueFrom(this.http.patch(`/api/chat/sessions/${id}`, { isArchived: true }));
+    this.sessionsResource.reload();
+  }
+
+  async updateProviderAndModel(
+    id: string,
+    defaultProvider: AiProviderKey,
+    defaultModel: string,
+  ): Promise<void> {
+    await firstValueFrom(
+      this.http.patch(`/api/chat/sessions/${id}`, {
+        defaultProvider,
+        defaultModel,
+      }),
+    );
     this.sessionsResource.reload();
   }
 

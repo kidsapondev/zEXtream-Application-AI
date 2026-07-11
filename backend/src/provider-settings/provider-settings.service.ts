@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { AiProvider } from '@prisma/client';
+import { AuditLogService } from '../common/audit-log.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ApiKeyEncryptionService } from './api-key-encryption.service';
 
@@ -58,6 +59,7 @@ export class ProviderSettingsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly encryption: ApiKeyEncryptionService,
+    private readonly auditLog: AuditLogService,
   ) {}
 
   async listForUser(userId: string) {
@@ -108,12 +110,22 @@ export class ProviderSettingsService {
         encryptionVersion: this.encryption.version,
       },
     });
+    this.auditLog.record('provider_credential.upsert', {
+      userId,
+      provider,
+      outcome: 'success',
+    });
   }
 
   async removeApiKey(userId: string, provider: string) {
     assertApiKeyProvider(provider);
     await this.prisma.providerCredential.deleteMany({
       where: { userId, provider },
+    });
+    this.auditLog.record('provider_credential.remove', {
+      userId,
+      provider,
+      outcome: 'success',
     });
   }
 

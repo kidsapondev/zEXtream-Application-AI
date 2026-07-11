@@ -44,6 +44,22 @@ describe('SessionListStore', () => {
     await archiving;
   });
 
+  it('updates a session provider and model with the same PATCH endpoint', async () => {
+    const store = TestBed.inject(SessionListStore);
+    const http = TestBed.inject(HttpTestingController);
+
+    const updating = store.updateProviderAndModel('session-1', 'openai', 'gpt-5.1');
+    const req = http.expectOne('/api/chat/sessions/session-1');
+    expect(req.request.method).toBe('PATCH');
+    expect(req.request.body).toEqual({
+      defaultProvider: 'openai',
+      defaultModel: 'gpt-5.1',
+    });
+    req.flush({});
+
+    await updating;
+  });
+
   it('deletes a session with a DELETE request', async () => {
     const store = TestBed.inject(SessionListStore);
     const http = TestBed.inject(HttpTestingController);
@@ -63,7 +79,10 @@ describe('SessionListStore', () => {
     const creating = store.createSession('ollama', 'qwen2.5-coder:14b');
     const req = http.expectOne('/api/chat/sessions');
     expect(req.request.method).toBe('POST');
-    expect(req.request.body).toEqual({ defaultProvider: 'ollama', defaultModel: 'qwen2.5-coder:14b' });
+    expect(req.request.body).toEqual({
+      defaultProvider: 'ollama',
+      defaultModel: 'qwen2.5-coder:14b',
+    });
     req.flush({ id: 'session-1' });
 
     await creating;
