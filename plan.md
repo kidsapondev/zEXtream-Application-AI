@@ -19,12 +19,12 @@
 | ------- | ------------------------------------------- | ----- | --------------------------------------------------------- |
 | Phase 0 | Repository และ project foundation           | `[x]` | Monorepo, pnpm, Docker และเอกสารหลักพร้อมแล้ว             |
 | Phase 1 | PostgreSQL และ Prisma                       | `[x]` | Schema และ migrations หลักพร้อมใช้งาน                     |
-| Phase 2 | Authentication และ users                    | `[~]` | Flow หลักเสร็จ แต่ refresh rotation ยังมี race condition  |
-| Phase 3 | Angular shell และ design system             | `[x]` | Login/register/layout และ components หลักมีแล้ว           |
-| Phase 4 | Chat session และ Ollama streaming           | `[~]` | Backend streaming correctness (concurrency/timeout/disconnect/malformed line) เสร็จแล้ว; frontend state race (P1) ยังเหลือ |
-| Phase 5 | Code artifacts และ Monaco Editor            | `[~]` | Source และ Docker build ผ่าน แต่ยังไม่ได้ E2E จริงครบถ้วน |
-| Phase 6 | Claude/OpenAI และ provider settings         | `[~]` | Claude/OpenAI providers, registry, capability metadata, DTO restriction และ connection-test endpoint implemented; model-selector UI และ full provider integration tests ยังเหลือ |
-| Phase 7 | Security hardening และ production readiness | `[ ]` | Rate limiting, Helmet, observability และ E2E ยังไม่มี     |
+| Phase 2 | Authentication และ users                    | `[x]` | Auth P0 ทั้งหมดปิดแล้ว (atomic rotation, timing-safe login, rate limiting, trusted proxy); เหลือเฉพาะ integration test coverage เพิ่มเติม |
+| Phase 3 | Angular shell และ design system             | `[x]` | Login/register/layout, design system, session management UI (rename/archive/delete), toasts, responsive layout, accessibility pass เสร็จแล้ว |
+| Phase 4 | Chat session และ Ollama streaming           | `[x]` | Backend streaming correctness (concurrency/timeout/disconnect/malformed line) และ frontend state race (stale response/dedup/scroll/connection banner) เสร็จแล้ว; เหลือ WS integration test suite |
+| Phase 5 | Code artifacts และ Monaco Editor            | `[~]` | Source และ Docker build ผ่าน, live-verified end-to-end; เหลือ artifact ownership integration tests |
+| Phase 6 | Claude/OpenAI และ provider settings         | `[~]` | Claude/OpenAI providers, registry, capability metadata, per-user gating, connection-test endpoint implemented; เหลือ model-selector UI และ provider integration tests กับ mocked upstream |
+| Phase 7 | Security hardening และ production readiness | `[~]` | Helmet/CSP, CORS allowlist, audit log, structured logging, health checks, metrics, backup/restore (ทดสอบจริงแล้ว) เสร็จ; เหลือ WS rate limiting, deployment section (ต้องตัดสินใจ infra) |
 
 ## สถานะ Repository
 
@@ -111,7 +111,7 @@
 - [ ] เพิ่ม integration test ที่รัน migrations บน database ว่าง
 - [ ] ทดสอบ cascade delete ของ user/session/message/artifact
 - [ ] ตรวจ compatibility ของ `uuidv7()` กับ PostgreSQL environment ทุกแห่งที่จะ deploy
-- [ ] เพิ่ม cleanup policy สำหรับ refresh tokens ที่หมดอายุหรือ revoked แล้ว
+- [x] เพิ่ม cleanup policy สำหรับ refresh tokens ที่หมดอายุหรือ revoked แล้ว (`RefreshTokenCleanupService` ดู Phase 7 → Reliability)
 - [ ] พิจารณา pagination สำหรับ messages, sessions และ artifact revisions
 - [ ] ปรับ `listLatestForSession()` ให้ query เฉพาะ revision ล่าสุดจาก database แทนโหลดทุก revision เข้า memory
 
