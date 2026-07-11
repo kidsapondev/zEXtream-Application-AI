@@ -66,12 +66,14 @@ describe('AuthService refresh rotation', () => {
       getOrThrow: jest.fn((key: string) => `${key}-value`),
       get: jest.fn((_key: string, fallback: string) => fallback),
     };
+    const auditLog = { record: jest.fn() };
 
     const service = new AuthService(
       prisma as never,
       usersService as never,
       jwtService as never,
       configService as never,
+      auditLog as never,
     );
 
     return {

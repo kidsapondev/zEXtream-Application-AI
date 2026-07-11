@@ -17,13 +17,15 @@ describe('AuthService.validateCredentials', () => {
       getOrThrow: jest.fn((key: string) => `${key}-value`),
       get: jest.fn((_key: string, fallback: string) => fallback),
     };
+    const auditLog = { record: jest.fn() };
     const service = new AuthService(
       {} as never,
       usersService as never,
       {} as never,
       configService as never,
+      auditLog as never,
     );
-    return { service, usersService };
+    return { service, usersService, auditLog };
   }
 
   beforeEach(() => {

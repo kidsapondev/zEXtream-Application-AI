@@ -10,6 +10,7 @@ import * as argon2 from 'argon2';
 import { createHash, randomUUID, timingSafeEqual } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { UsersService } from '../users/users.service';
+import { AuditLogService } from '../common/audit-log.service';
 
 export interface TokenRequestMeta {
   userAgent?: string;
@@ -81,6 +82,7 @@ export class AuthService {
     private readonly usersService: UsersService,
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
+    private readonly auditLog: AuditLogService,
   ) {
     this.accessSecret =
       this.configService.getOrThrow<string>('JWT_ACCESS_SECRET');
@@ -96,7 +98,11 @@ export class AuthService {
     );
   }
 
-  async validateCredentials(email: string, password: string) {
+  async validateCredentials(
+    email: string,
+    password: string,
+    meta: TokenRequestMeta = {},
+  ) {
     const user = await this.usersService.findByEmail(email);
     const isAccountUsable = !!user && user.isActive;
     const passwordHash = isAccountUsable
@@ -104,6 +110,12 @@ export class AuthService {
       : await getDummyPasswordHash();
     const valid = await argon2.verify(passwordHash, password);
     if (!isAccountUsable || !valid) {
+      // userId is only known when the account exists; never log the email itself (PII).
+      this.auditLog.record('auth.login.failure', {
+        userId: user?.id ?? null,
+        ipAddress: meta.ipAddress ?? null,
+        outcome: 'failure',
+      });
       return null;
     }
     return { id: user.id, email: user.email, displayName: user.displayName };
@@ -126,6 +138,11 @@ export class AuthService {
       displayName: data.displayName,
     });
     const tokens = await this.issueTokenPair(user.id, user.email, meta);
+    this.auditLog.record('auth.register', {
+      userId: user.id,
+      ipAddress: meta.ipAddress ?? null,
+      outcome: 'success',
+    });
     return {
       user: { id: user.id, email: user.email, displayName: user.displayName },
       tokens,
@@ -137,6 +154,11 @@ export class AuthService {
     meta: TokenRequestMeta,
   ) {
     const tokens = await this.issueTokenPair(user.id, user.email, meta);
+    this.auditLog.record('auth.login.success', {
+      userId: user.id,
+      ipAddress: meta.ipAddress ?? null,
+      outcome: 'success',
+    });
     return { user, tokens };
   }
 
@@ -161,10 +183,7 @@ export class AuthService {
     if (row.revokedAt) {
       // A revoked token being presented again means it was already rotated once before —
       // this is the reuse-detection signal for token theft. Nuke the whole rotation chain.
-      await this.prisma.refreshToken.updateMany({
-        where: { familyId: row.familyId, revokedAt: null },
-        data: { revokedAt: new Date() },
-      });
+      await this.revokeFamilyAndAudit(row.familyId, userId, meta);
       throw new UnauthorizedException(
         'Refresh token reuse detected, all sessions revoked',
       );
@@ -197,25 +216,50 @@ export class AuthService {
           throw new RefreshRotationConflictError();
         }
 
+        this.auditLog.record('auth.refresh.success', {
+          userId,
+          ipAddress: meta.ipAddress ?? null,
+          outcome: 'success',
+        });
         return tokens;
       });
     } catch (error) {
       if (!(error instanceof RefreshRotationConflictError)) throw error;
 
-      await this.prisma.refreshToken.updateMany({
-        where: { familyId: row.familyId, revokedAt: null },
-        data: { revokedAt: new Date() },
-      });
+      await this.revokeFamilyAndAudit(row.familyId, userId, meta);
       throw new UnauthorizedException(
         'Refresh token reuse detected, all sessions revoked',
       );
     }
   }
 
-  async logout(tokenId: string) {
+  // Shared by both reuse-detection paths above (a revoked token presented again, and a
+  // rotation race where two requests tried to rotate the same row concurrently) so the
+  // "revoke everything + audit log" behavior can't drift between them.
+  private async revokeFamilyAndAudit(
+    familyId: string,
+    userId: string,
+    meta: TokenRequestMeta,
+  ): Promise<void> {
+    await this.prisma.refreshToken.updateMany({
+      where: { familyId, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+    this.auditLog.record('auth.refresh.reuse_detected', {
+      userId,
+      ipAddress: meta.ipAddress ?? null,
+      outcome: 'failure',
+    });
+  }
+
+  async logout(userId: string, tokenId: string) {
     await this.prisma.refreshToken.updateMany({
       where: { id: tokenId, revokedAt: null },
       data: { revokedAt: new Date() },
+    });
+    this.auditLog.record('auth.logout', {
+      userId,
+      outcome: 'success',
     });
   }
 

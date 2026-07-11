@@ -55,6 +55,7 @@ services:
       CORS_ORIGIN: ${CORS_ORIGIN}
       NODE_ENV: ${NODE_ENV}
       TRUST_PROXY: ${TRUST_PROXY}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
     extra_hosts:
       - 'host.docker.internal:host-gateway'
     depends_on:

@@ -124,8 +124,8 @@ export class AuthController {
   @UseGuards(JwtRefreshGuard)
   @Post('logout')
   async logout(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
-    const { tokenId } = req.user as { id: string; tokenId: string };
-    await this.authService.logout(tokenId);
+    const { id, tokenId } = req.user as { id: string; tokenId: string };
+    await this.authService.logout(id, tokenId);
     res.clearCookie(REFRESH_COOKIE_NAME, { path: REFRESH_COOKIE_PATH });
     return { success: true };
   }

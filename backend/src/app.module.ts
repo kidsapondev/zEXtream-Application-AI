@@ -1,11 +1,16 @@
-import { Module } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
+import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
+import { LoggerModule } from 'nestjs-pino';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { PrismaModule } from './prisma/prisma.module';
 import { validateEnv } from './config/env.validation';
+import { buildPinoHttpOptions } from './common/logger.config';
+import { CommonModule } from './common/common.module';
+import { MetricsMiddleware } from './common/metrics.middleware';
+import { HealthModule } from './health/health.module';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { ChatModule } from './chat/chat.module';
@@ -19,6 +24,15 @@ import { ProviderSettingsModule } from './provider-settings/provider-settings.mo
       isGlobal: true,
       validate: validateEnv,
     }),
+    LoggerModule.forRootAsync({
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => ({
+        pinoHttp: buildPinoHttpOptions(
+          config.get<string>('LOG_LEVEL', 'info'),
+          config.get<string>('NODE_ENV') === 'production',
+        ),
+      }),
+    }),
     // Default rate limit for the whole REST API. Individual auth endpoints
     // override this with tighter, purpose-specific limits via @Throttle().
     ThrottlerModule.forRoot([
@@ -28,6 +42,8 @@ import { ProviderSettingsModule } from './provider-settings/provider-settings.mo
       },
     ]),
     PrismaModule,
+    CommonModule,
+    HealthModule,
     UsersModule,
     AuthModule,
     ChatModule,
@@ -45,4 +61,8 @@ import { ProviderSettingsModule } from './provider-settings/provider-settings.mo
     { provide: APP_GUARD, useClass: ThrottlerGuard },
   ],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer) {
+    consumer.apply(MetricsMiddleware).forRoutes('{*path}');
+  }
+}
