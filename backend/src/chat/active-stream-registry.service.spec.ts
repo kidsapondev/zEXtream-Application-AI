@@ -103,4 +103,22 @@ describe('ActiveStreamRegistry', () => {
       expect(() => registry.release('message-1')).not.toThrow();
     });
   });
+
+  describe('onApplicationShutdown', () => {
+    it('aborts every in-flight stream across every session', () => {
+      const controllerA = registry.register('message-1', 'session-1');
+      const controllerB = registry.register('message-2', 'session-2');
+
+      registry.onApplicationShutdown('SIGTERM');
+
+      expect(controllerA.signal.aborted).toBe(true);
+      expect(controllerB.signal.aborted).toBe(true);
+      expect(registry.hasActiveStream('session-1')).toBe(false);
+      expect(registry.hasActiveStream('session-2')).toBe(false);
+    });
+
+    it('is a no-op when nothing is streaming and does not throw', () => {
+      expect(() => registry.onApplicationShutdown('SIGTERM')).not.toThrow();
+    });
+  });
 });

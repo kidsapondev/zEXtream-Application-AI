@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger, OnApplicationShutdown } from '@nestjs/common';
 
 interface StreamEntry {
   sessionId: string;
@@ -24,7 +24,8 @@ interface StreamEntry {
  * sessions (or different users) from streaming concurrently.
  */
 @Injectable()
-export class ActiveStreamRegistry {
+export class ActiveStreamRegistry implements OnApplicationShutdown {
+  private readonly logger = new Logger(ActiveStreamRegistry.name);
   private readonly controllers = new Map<string, StreamEntry>();
   private readonly bySession = new Map<string, Set<string>>();
 
@@ -73,5 +74,29 @@ export class ActiveStreamRegistry {
       this.controllers.delete(messageId);
     }
     this.bySession.delete(sessionId);
+  }
+
+  /**
+   * Aborts every in-flight stream, regardless of session. Called automatically
+   * on SIGTERM/SIGINT via Nest's onApplicationShutdown (see
+   * app.enableShutdownHooks() in main.ts) so a deploy/restart doesn't leave
+   * upstream AI requests running past the process that was going to consume
+   * them. Each abort still runs through onChatSend's normal `catch`/`finally`
+   * path (the abort signal is what onChatSend is already listening to), which
+   * finalizes the message as `stopped` and emits chat:message:updated — the
+   * same path a user-initiated chat:stop takes — so no message is left
+   * dangling in `streaming` status by a graceful shutdown specifically
+   * (reconcileStuckMessages() remains the backstop for an ungraceful crash).
+   */
+  onApplicationShutdown(signal?: string): void {
+    if (this.controllers.size === 0) return;
+    this.logger.log(
+      `Aborting ${this.controllers.size} in-flight stream(s) for shutdown (${signal ?? 'unknown'})`,
+    );
+    for (const entry of this.controllers.values()) {
+      entry.controller.abort();
+    }
+    this.controllers.clear();
+    this.bySession.clear();
   }
 }

@@ -379,7 +379,7 @@
 
 ### งานที่ต้องทำ
 
-- [ ] ออกแบบ provider configuration model ต่อ user
+- [x] ออกแบบ provider configuration model ต่อ user (`ProviderCredential` ใน Prisma schema: `(userId, provider)` unique, encrypted API key ต่อ provider ต่อ user; `ProviderSettingsService` ให้ list/upsert/remove/hasApiKey/getApiKeyForRuntime/testConnection และ per-user gating ใน session create/send — ดู Phase 6)
 - [x] เลือก encryption format สำหรับ API key แบบ authenticated encryption
 - [x] Validate `API_KEY_ENCRYPTION_KEY` เป็น key length/encoding ที่ถูกต้อง ไม่ใช่เพียง non-empty string
 - [x] สร้าง service สำหรับ encrypt/decrypt/rotate API keys
@@ -411,7 +411,7 @@
 ### Security
 
 - [x] เพิ่ม Helmet และกำหนด CSP ให้รองรับ Monaco อย่างปลอดภัย — Helmet ใน `backend/src/main.ts` (default-deny CSP, API ตอบ JSON เท่านั้นจึง CSP มีผลจำกัด) และ CSP เต็มรูปแบบ (รวม `worker-src blob: data:` และ `style-src 'unsafe-inline'` สำหรับ Monaco) ใน `frontend/nginx.conf` ซึ่งเป็นจุดที่เสิร์ฟ HTML จริง
-- [ ] เพิ่ม rate limiting สำหรับ REST และ WebSocket events — REST เสร็จแล้ว (throttle เดิมบน auth + เพิ่มใหม่บน `POST /api/chat/sessions`); **WebSocket ยังไม่มี** เพราะ `ThrottlerGuard` ของ NestJS ไม่ครอบ `@SubscribeMessage` handlers และการ implement per-socket token-bucket ต้องแก้ `backend/src/realtime/chat.gateway.ts` ซึ่งเป็นไฟล์ที่อีก agent กำลังแก้ไขพร้อมกันอยู่ ทิ้งไว้เป็น follow-up
+- [x] เพิ่ม rate limiting สำหรับ REST และ WebSocket events — REST เสร็จแล้ว (throttle เดิมบน auth + เพิ่มใหม่บน `POST /api/chat/sessions`); WebSocket เสร็จแล้วในรอบถัดมาด้วย `WsRateLimiterService` (`backend/src/realtime/ws-rate-limiter.service.ts`) — per-socket fixed-window limiter เพราะ `ThrottlerGuard` ของ NestJS ไม่ครอบ `@SubscribeMessage` handlers; จำกัด `chat:send` 10/min, `session:join`/`session:leave` 30/min, `chat:stop` 20/min, `artifact:edit` 60/min ต่อ socket และล้าง state ตอน disconnect
 - [x] เพิ่ม request/body size limits — จำกัด JSON/urlencoded body ที่ 256kb ผ่าน `app.useBodyParser()` ใน `main.ts`
 - [x] เพิ่ม WebSocket event validation pipe/schema — มีอยู่แล้วจากรอบก่อนหน้า (`@UsePipes(ValidationPipe)` + `WsValidationFilter` ใน `chat.gateway.ts`) ตรวจสอบแล้วว่ายังอยู่
 - [x] กำหนด CORS allowlist แทนค่า origin เดียวแบบคลุมเครือ — `CORS_ORIGIN` รองรับ comma-separated list พร้อม validate ด้วย zod, ค่าว่างจะปิด CORS แทนที่จะ fallback เป็น allow-all
@@ -425,12 +425,12 @@
 
 ### Reliability
 
-- [ ] เพิ่ม graceful shutdown ให้ active streams — เพิ่ม `app.enableShutdownHooks()` และ `AppShutdownService` (`backend/src/common/app-shutdown.service.ts`) แล้ว แต่การ drain active stream จริงต้อง hook เข้า `ActiveStreamRegistry` (`backend/src/chat/active-stream-registry.service.ts`) ซึ่งเพิ่ง merge เข้ามาจากอีก agent ระหว่างรอบนี้แต่ยังไม่นิ่ง (test ของ provider ที่เกี่ยวข้องยัง flaky ระหว่างทำงาน) จึงยังไม่ wire เข้าไปเพื่อเลี่ยง merge conflict กับงานที่กำลังทำอยู่ — `reconcileStuckMessages()` ยังคุ้มครอง data-loss กรณี restart กลาง stream อยู่ ไม่ใช่ silent gap
+- [x] เพิ่ม graceful shutdown ให้ active streams — `app.enableShutdownHooks()` + `AppShutdownService` (`backend/src/common/app-shutdown.service.ts`) เดิม บวก `ActiveStreamRegistry` implement `OnApplicationShutdown` เองโดยตรงในรอบถัดมา (`backend/src/chat/active-stream-registry.service.ts`) — abort ทุก stream ที่ยังทำงานอยู่ตอน SIGTERM/SIGINT ผ่าน path เดียวกับ user-initiated `chat:stop` (finalize เป็น `stopped` และ emit `chat:message:updated`) เลือกวิธีนี้แทนการ inject registry เข้า `AppShutdownService` เพื่อเลี่ยง cross-module coupling; `reconcileStuckMessages()` ยังคุ้มครอง data-loss กรณี restart แบบไม่ graceful (crash) อยู่เหมือนเดิม
 - [ ] เพิ่ม timeout/retry/circuit breaker สำหรับ AI providers — timeout เสร็จแล้วโดยอีก agent (`ollama.provider.ts` มี connect-timeout + inactivity-timeout ผ่าน `AbortController`); **retry และ circuit breaker ยังไม่มี** ในโค้ดปัจจุบัน (ตรวจแล้วด้วย grep) จึงยังไม่ติ๊กจนกว่าจะเพิ่ม
 - [x] เพิ่ม database connection/readiness checks — `GET /api/health/ready` ใหม่ (`backend/src/health/`) ping Postgres ด้วย `SELECT 1`; `GET /api/health` เดิมเป็น liveness
 - [x] กำหนด backup/restore procedure สำหรับ PostgreSQL — `docs/backup-restore.md` พร้อมทดสอบจริงแล้ว (`pg_dump`/`pg_restore` กับ container ที่รันอยู่จริง ดูรายละเอียดในเอกสาร)
 - [x] เพิ่ม cleanup สำหรับ stale streaming artifacts และ refresh tokens — เพิ่ม `RefreshTokenCleanupService` (`@Cron` รายวัน, ลบ token ที่หมดอายุ/ถูก revoke เกิน 30 วัน) ส่วน stale streaming artifacts: `reconcileStuckMessages()` เดิมที่ทำงานตอนเปิด session ถือว่าเพียงพอแล้ว ไม่ได้เพิ่ม periodic sweep เพราะยังไม่พบ gap จริงที่ on-load reconciliation ไม่ครอบคลุม
-- [ ] เพิ่ม pagination และ retention policy — ข้ามรอบนี้ เพราะจะต้องแก้ `chat-sessions.service.ts` ซึ่งเป็นไฟล์ของอีก agent ที่กำลังแก้ไขอยู่ ทิ้งไว้เป็น follow-up
+- [x] เพิ่ม pagination และ retention policy — pagination เสร็จแล้วในรอบถัดมา (`limit`/`offset` บน session list, message history และ artifact revisions ดู Phase 1) โดย agent ที่ตอนแรกถูกกันไว้เพราะชนไฟล์กัน; retention policy (นโยบายเก็บข้อมูลนานเท่าไหร่) ยังเป็นการตัดสินใจเชิงผลิตภัณฑ์ที่ยังไม่ได้ทำ ไม่ใช่งาน code
 - [ ] ทดสอบ server restart ระหว่าง active stream — ยังไม่ได้ทดสอบจริง เพราะต้องมี full stack + AI provider ทำงานอยู่พร้อม active stream ซึ่งไม่พร้อมใช้งานในรอบนี้ (backup/restore ทดสอบจริงแล้วแยกต่างหาก ดูด้านบน); ทิ้งเป็น manual test procedure ที่ยังต้องทำ
 - [ ] ทดสอบ migration rollback/forward strategy — ยังไม่ได้ทำ ทิ้งไว้เป็น follow-up
 

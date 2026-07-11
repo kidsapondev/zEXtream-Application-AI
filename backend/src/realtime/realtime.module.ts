@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { ChatGateway } from './chat.gateway';
+import { WsRateLimiterService } from './ws-rate-limiter.service';
 import { ChatModule } from '../chat/chat.module';
 import { AiModule } from '../ai/ai.module';
 import { ArtifactsModule } from '../artifacts/artifacts.module';
@@ -20,6 +21,6 @@ import { ProviderSettingsModule } from '../provider-settings/provider-settings.m
     ArtifactsModule,
     ProviderSettingsModule,
   ],
-  providers: [ChatGateway],
+  providers: [ChatGateway, WsRateLimiterService],
 })
 export class RealtimeModule {}

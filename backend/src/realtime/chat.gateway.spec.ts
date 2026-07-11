@@ -2,6 +2,7 @@ import { Socket } from 'socket.io';
 import { WsException } from '@nestjs/websockets';
 import { BadRequestException, ValidationPipe } from '@nestjs/common';
 import { ChatGateway } from './chat.gateway';
+import { WsRateLimiterService } from './ws-rate-limiter.service';
 import { MAX_ARTIFACT_CONTENT_BYTES } from '../artifacts/artifacts.service';
 import { MAX_CHAT_MESSAGE_BYTES } from '../chat/messages.service';
 import { ChatSendDto } from './dto/chat-send.dto';
@@ -51,6 +52,7 @@ describe('ChatGateway chat:stop', () => {
     streamRegistry as never,
     {} as never,
     {} as never,
+    new WsRateLimiterService(),
   );
 
   const client = { data: { userId: 'user-1' } } as unknown as Socket;
@@ -110,6 +112,7 @@ describe('ChatGateway chat:send failure handling', () => {
     getApiKeyForRuntime: jest.fn(),
   };
   const emit = jest.fn<(event: string, payload: unknown) => void>();
+  const wsRateLimiter = new WsRateLimiterService();
 
   const gateway = new ChatGateway(
     {} as never,
@@ -120,12 +123,18 @@ describe('ChatGateway chat:send failure handling', () => {
     streamRegistry as never,
     artifactsService as never,
     providerSettingsService as never,
+    wsRateLimiter,
   );
 
   gateway.server = { to: jest.fn(() => ({ emit })) } as never;
 
   beforeEach(() => {
     jest.clearAllMocks();
+    // The shared `client` fixture above has no `id`, so every onChatSend call in
+    // this describe block hits the same rate-limit bucket — without this reset,
+    // tests deep into the file would spuriously start failing once the bucket
+    // fills, since real request volume isn't the thing being tested here.
+    wsRateLimiter.reset();
     sessionsService.getOwned.mockResolvedValue({
       title: 'New Chat',
       defaultProvider: 'ollama',
@@ -179,6 +188,23 @@ describe('ChatGateway chat:send failure handling', () => {
     expect(
       messagesService.createPendingAssistantMessage,
     ).not.toHaveBeenCalled();
+  });
+
+  it('rejects chat:send once the per-socket rate limit is exceeded', async () => {
+    aiProviderFactory.hasProvider.mockReturnValue(false);
+
+    // The limit is 10/window; the first 10 calls fail for the unrelated
+    // "disabled provider" reason above, the 11th must fail specifically
+    // because the rate limiter kicked in, before even reaching that check.
+    for (let i = 0; i < 10; i += 1) {
+      await expect(
+        gateway.onChatSend(client, { sessionId: 'session-1', content: 'hi' }),
+      ).rejects.toBeInstanceOf(WsException);
+    }
+
+    await expect(
+      gateway.onChatSend(client, { sessionId: 'session-1', content: 'hi' }),
+    ).rejects.toThrow('Rate limit exceeded for chat:send');
   });
 
   it('finalizes the assistant message when the provider throws', async () => {
@@ -559,6 +585,7 @@ describe('ChatGateway auth is enforced by the gateway itself, independent of the
     streamRegistry as never,
     artifactsService as never,
     {} as never,
+    new WsRateLimiterService(),
   );
 
   const unauthenticatedClient = { data: {} } as unknown as Socket;

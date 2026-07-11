@@ -34,6 +34,7 @@ import { ChatStopDto } from './dto/chat-stop.dto';
 import { ArtifactEditDto } from './dto/artifact-edit.dto';
 import { ChatSendDto } from './dto/chat-send.dto';
 import { WsValidationFilter } from './ws-validation.filter';
+import { WsRateLimiterService } from './ws-rate-limiter.service';
 
 interface AccessTokenPayload {
   sub: string;
@@ -47,6 +48,18 @@ const SYSTEM_PROMPT = `When you write code that creates or edits a file, wrap it
 Always include the filename after a colon in the fence info string. For short inline snippets that aren't a file, use regular single backticks instead.`;
 
 const AUTO_TITLE_MAX_LENGTH = 40;
+
+const RATE_LIMIT_WINDOW_MS = 60_000;
+// chat:send is the expensive one (writes rows, calls out to an AI provider),
+// so it gets the tightest limit; join/leave/stop/edit are cheap but still
+// capped as a backstop against a buggy or malicious client hammering them.
+const RATE_LIMITS = {
+  'chat:send': 10,
+  'session:join': 30,
+  'session:leave': 30,
+  'chat:stop': 20,
+  'artifact:edit': 60,
+} as const;
 
 /** Derives a short session title from the first user message (trimmed at a word boundary). */
 function deriveSessionTitle(content: string): string | null {
@@ -103,6 +116,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly streamRegistry: ActiveStreamRegistry,
     private readonly artifactsService: ArtifactsService,
     private readonly providerSettingsService: ProviderSettingsService,
+    private readonly wsRateLimiter: WsRateLimiterService,
   ) {}
 
   handleConnection(client: Socket) {
@@ -137,6 +151,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
    */
   handleDisconnect(client: Socket) {
     this.logger.debug(`Socket disconnected: ${client.id}`);
+    this.wsRateLimiter.release(client.id);
   }
 
   @SubscribeMessage('session:join')
@@ -144,6 +159,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @ConnectedSocket() client: Socket,
     @MessageBody() body: SessionJoinDto,
   ) {
+    this.assertNotRateLimited(client, 'session:join');
     await this.sessionsService.getOwned(this.userId(client), body.sessionId);
     await client.join(this.roomName(body.sessionId));
   }
@@ -153,6 +169,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @ConnectedSocket() client: Socket,
     @MessageBody() body: SessionLeaveDto,
   ) {
+    this.assertNotRateLimited(client, 'session:leave');
     await client.leave(this.roomName(body.sessionId));
   }
 
@@ -161,6 +178,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @ConnectedSocket() client: Socket,
     @MessageBody() body: ChatStopDto,
   ) {
+    this.assertNotRateLimited(client, 'chat:stop');
     const isOwner = await this.messagesService.isOwnedByUser(
       body.messageId,
       this.userId(client),
@@ -174,6 +192,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @ConnectedSocket() client: Socket,
     @MessageBody() body: ArtifactEditDto,
   ) {
+    this.assertNotRateLimited(client, 'artifact:edit');
     const existing = await this.artifactsService.getById(body.artifactId);
     if (!existing) return;
     await this.sessionsService.getOwned(
@@ -199,6 +218,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @ConnectedSocket() client: Socket,
     @MessageBody() body: ChatSendDto,
   ) {
+    this.assertNotRateLimited(client, 'chat:send');
     const userId = this.userId(client);
     const session = await this.sessionsService.getOwned(userId, body.sessionId);
     const room = this.roomName(body.sessionId);
@@ -418,6 +438,20 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         finalErrorMessage,
       );
       this.server.to(room).emit('chat:message:updated', { message: updated });
+    }
+  }
+
+  private assertNotRateLimited(
+    client: Socket,
+    event: keyof typeof RATE_LIMITS,
+  ): void {
+    const allowed = this.wsRateLimiter.allow(
+      `${client.id}:${event}`,
+      RATE_LIMITS[event],
+      RATE_LIMIT_WINDOW_MS,
+    );
+    if (!allowed) {
+      throw new WsException(`Rate limit exceeded for ${event}`);
     }
   }
 
