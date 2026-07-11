@@ -45,8 +45,8 @@
 
 - [x] กำหนด `D:\AI\zEXtream-Application-AI` เป็น canonical working copy
 - [x] กำหนดให้หยุดแก้ source ใน `D:\AI\chat-workspace`
-- [ ] ตรวจ `login.md`; หากมี credential จริงให้ลบจาก Git history และเปลี่ยนรหัสผ่าน
-- [ ] เพิ่ม `.idea/` ลง `.gitignore` หากไม่ต้องการแชร์ IDE configuration
+- [~] ตรวจ `login.md`; หากมี credential จริงให้ลบจาก Git history และเปลี่ยนรหัสผ่าน (เป็น test credential เท่านั้น (`test3@example.com`), ลบออกจาก tracked files และ `.gitignore` แล้วโดย session ก่อนหน้า, ลบไฟล์ untracked ที่ค้างอยู่ใน working copy แล้ว; ยังไม่ได้ rewrite Git history เพราะเป็น destructive operation ที่ต้องยืนยันจากผู้ใช้ก่อน — commit `0e58258` ยังมี blob นี้อยู่)
+- [x] เพิ่ม `.idea/` ลง `.gitignore` หากไม่ต้องการแชร์ IDE configuration
 
 เกณฑ์รับงาน:
 
@@ -77,11 +77,11 @@
 
 ### ต้องปรับปรุง
 
-- [ ] เพิ่ม root scripts สำหรับ build/test/lint ทั้ง workspace เช่น `build`, `test`, `lint`, `check`
-- [ ] เพิ่ม CI pipeline เพื่อรัน install, generate Prisma, build, test และ lint ทุก commit
-- [ ] กำหนด line-ending policy ด้วย `.gitattributes` เพื่อลด warning LF/CRLF บน Windows
-- [ ] กำหนด license ให้ชัดเจน หรือยืนยันว่าเป็น proprietary project
-- [ ] ลบ Nest/Angular starter README ที่ไม่เกี่ยวข้อง หรือเปลี่ยนให้ลิงก์กลับ root README
+- [x] เพิ่ม root scripts สำหรับ build/test/lint ทั้ง workspace เช่น `build`, `test`, `lint`, `check`
+- [x] เพิ่ม CI pipeline เพื่อรัน install, generate Prisma, build, test และ lint ทุก commit (`.github/workflows/ci.yml`)
+- [x] กำหนด line-ending policy ด้วย `.gitattributes` เพื่อลด warning LF/CRLF บน Windows
+- [ ] กำหนด license ให้ชัดเจน หรือยืนยันว่าเป็น proprietary project (ต้องตัดสินใจโดยเจ้าของโปรเจกต์)
+- [x] ลบ Nest/Angular starter README ที่ไม่เกี่ยวข้อง หรือเปลี่ยนให้ลิงก์กลับ root README
 
 เกณฑ์รับงาน:
 

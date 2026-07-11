@@ -7,6 +7,10 @@
   },
   "scripts": {
     "dev": "docker compose up",
-    "dev:build": "docker compose up --build"
+    "dev:build": "docker compose up --build",
+    "build": "pnpm --filter backend exec prisma generate && pnpm --filter backend build && pnpm --filter frontend build",
+    "test": "pnpm --filter backend test --runInBand && pnpm --filter frontend exec ng test --watch=false",
+    "lint": "pnpm --filter backend exec eslint \"{src,apps,libs,test}/**/*.ts\"",
+    "check": "pnpm run build && pnpm run test && pnpm run lint"
   }
 }
