@@ -483,7 +483,7 @@
 - [x] `ArtifactsService` revision selection/concurrency
 - [x] `OllamaProvider` parsing, abort และ upstream errors (รวม timeout ใหม่และ malformed line)
 - [x] `ActiveStreamRegistry` register/stop/release (รวม `stopAllForSession` และ stop/release ของ id ที่ไม่รู้จัก/ถูก release แล้ว)
-- [~] Angular `AuthStore`, `ChatStore` และ `ArtifactStore` (`ChatStore` และ `ArtifactStore` มี spec ครบ — stale-response guard, dedup, streaming guard, exception toast, debounce/revision; `AuthStore` ยังไม่มี spec โดยเฉพาะ)
+- [x] Angular `AuthStore`, `ChatStore` และ `ArtifactStore` (`ChatStore` และ `ArtifactStore` มี spec ครบ — stale-response guard, dedup, streaming guard, exception toast, debounce/revision; เพิ่ม `AuthStore` spec แล้ว — `frontend/src/app/core/auth.store.spec.ts`: login/register สำเร็จ/ล้มเหลว, `tryRefresh()` สำเร็จ/ล้มเหลว, concurrent `tryRefresh()` callers share การเรียกเดียวกันจริง (ไม่ยิงซ้ำ), logout เคลียร์ state แม้ request fail; frontend suite รวม 45/45 ผ่าน)
 
 ### Integration tests
 
