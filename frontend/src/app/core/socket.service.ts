@@ -1,7 +1,9 @@
-import { inject, Injectable, InjectionToken } from '@angular/core';
+import { inject, Injectable, InjectionToken, signal } from '@angular/core';
 import { io, ManagerOptions, Socket, SocketOptions } from 'socket.io-client';
 
 type SocketFactory = (options: Partial<ManagerOptions & SocketOptions>) => Socket;
+
+export type SocketConnectionState = 'connected' | 'disconnected' | 'reconnecting';
 
 export const SOCKET_FACTORY = new InjectionToken<SocketFactory>('SOCKET_FACTORY', {
   providedIn: 'root',
@@ -14,6 +16,9 @@ export class SocketService {
   private socket: Socket | null = null;
   private accessToken: string | null = null;
 
+  /** Live connection status, driven by the underlying Socket.IO client's own lifecycle events. */
+  readonly connectionState = signal<SocketConnectionState>('disconnected');
+
   connect(): Socket {
     if (!this.socket) {
       this.socket = this.createSocket({
@@ -21,6 +26,11 @@ export class SocketService {
         autoConnect: false,
         auth: (cb) => cb({ token: this.accessToken }),
       });
+      this.socket.on('connect', () => this.connectionState.set('connected'));
+      this.socket.on('disconnect', () => this.connectionState.set('disconnected'));
+      this.socket.on('connect_error', () => this.connectionState.set('disconnected'));
+      this.socket.io.on('reconnect_attempt', () => this.connectionState.set('reconnecting'));
+      this.socket.io.on('reconnect', () => this.connectionState.set('connected'));
     }
 
     if (this.accessToken && !this.socket.connected) {
@@ -46,6 +56,7 @@ export class SocketService {
   disconnect(): void {
     this.accessToken = null;
     this.socket?.disconnect();
+    this.connectionState.set('disconnected');
   }
 
   get instance(): Socket {

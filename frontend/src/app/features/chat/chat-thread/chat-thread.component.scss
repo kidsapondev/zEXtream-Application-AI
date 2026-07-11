@@ -53,6 +53,11 @@
     background: none;
     text-decoration: underline;
     cursor: pointer;
+
+    &:focus-visible {
+      outline: 2px solid var(--color-brand-yellow);
+      outline-offset: 2px;
+    }
   }
 }
 
@@ -91,5 +96,15 @@
     padding: 0 var(--space-5);
     font-weight: 700;
     cursor: pointer;
+
+    &:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    &:focus-visible {
+      outline: 2px solid var(--color-brand-yellow);
+      outline-offset: 2px;
+    }
   }
 }

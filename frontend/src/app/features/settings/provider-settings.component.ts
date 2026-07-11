@@ -9,6 +9,7 @@ import { PageHeaderComponent } from '../../design-system/page-header/page-header
 import { HairlineCardComponent } from '../../design-system/hairline-card/hairline-card.component';
 import { BadgePillComponent } from '../../design-system/badge-pill/badge-pill.component';
 import { AuthStore } from '../../core/auth.store';
+import { ToastService } from '../../core/toast.service';
 import { SessionListStore } from '../chat/session-list.store';
 
 @Component({
@@ -29,6 +30,7 @@ export class ProviderSettingsComponent {
   private readonly router = inject(Router);
   protected readonly authStore = inject(AuthStore);
   private readonly sessionListStore = inject(SessionListStore);
+  private readonly toastService = inject(ToastService);
 
   readonly settings = signal<ProviderSettingDto[]>([]);
   readonly apiKeys = signal<Record<string, string>>({});
@@ -84,8 +86,10 @@ export class ProviderSettingsComponent {
       );
       this.setKey(setting.provider, '');
       await this.load();
+      this.toastService.show(`${setting.provider} key saved.`, 'success');
     } catch {
       this.error.set(`Could not save ${setting.provider} credentials.`);
+      this.toastService.show(`Could not save ${setting.provider} credentials.`, 'error');
     } finally {
       this.savingProvider.set(null);
     }
@@ -97,8 +101,10 @@ export class ProviderSettingsComponent {
     try {
       await firstValueFrom(this.http.delete(`/api/settings/providers/${setting.provider}`));
       await this.load();
+      this.toastService.show(`${setting.provider} key removed.`, 'success');
     } catch {
       this.error.set(`Could not remove ${setting.provider} credentials.`);
+      this.toastService.show(`Could not remove ${setting.provider} credentials.`, 'error');
     } finally {
       this.savingProvider.set(null);
     }

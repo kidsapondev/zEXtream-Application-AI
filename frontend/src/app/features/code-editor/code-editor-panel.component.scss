@@ -24,28 +24,45 @@
 .tab {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-2) var(--space-3);
-  border: none;
+  gap: var(--space-1);
   border-right: 1px solid var(--color-hairline);
   background: var(--color-canvas);
-  font-size: 12px;
-  color: var(--color-text-secondary);
-  cursor: pointer;
   white-space: nowrap;
 }
 
 .tab--active {
   background: var(--color-canvas-raised);
-  color: var(--color-ink);
-  font-weight: 600;
+}
+
+.tab__select {
+  border: none;
+  background: none;
+  padding: var(--space-2) 0 var(--space-2) var(--space-3);
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+
+  .tab--active & {
+    color: var(--color-ink);
+    font-weight: 600;
+  }
 }
 
 .tab__close {
+  all: unset;
+  padding: var(--space-2) var(--space-3);
   color: var(--color-text-muted);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
 
   &:hover {
     color: var(--color-status-negative);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--color-brand-yellow);
+    outline-offset: -2px;
   }
 }
 

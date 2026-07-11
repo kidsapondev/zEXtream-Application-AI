@@ -24,3 +24,16 @@ h4 {
   font-family: var(--font-heading);
   margin: 0;
 }
+
+// Shared across the session sidebar, provider settings and the chat thread —
+// once the same three rules were about to be duplicated a third time, it
+// earned a spot in the global stylesheet instead.
+.hint {
+  color: var(--color-text-muted);
+  font-size: 13px;
+  padding: var(--space-3);
+}
+
+.hint--error {
+  color: var(--color-status-negative);
+}

@@ -29,6 +29,12 @@ export class SessionListStore {
     this.sessionsResource.reload();
   }
 
+  /** Archiving a session hides it from `listForUser()` — the REST layer already filters `isArchived: false`. */
+  async archiveSession(id: string): Promise<void> {
+    await firstValueFrom(this.http.patch(`/api/chat/sessions/${id}`, { isArchived: true }));
+    this.sessionsResource.reload();
+  }
+
   async deleteSession(id: string): Promise<void> {
     await firstValueFrom(this.http.delete(`/api/chat/sessions/${id}`));
     this.sessionsResource.reload();

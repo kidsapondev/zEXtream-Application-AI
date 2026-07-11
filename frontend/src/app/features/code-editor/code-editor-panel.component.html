@@ -2,19 +2,19 @@
   <div class="code-editor-panel__toolbar">
     <div class="code-editor-panel__tabs">
       @for (filename of artifactStore.openTabs(); track filename) {
-        <button
-          type="button"
-          class="tab"
-          [class.tab--active]="filename === artifactStore.activeFilename()"
-          (click)="artifactStore.selectTab(filename)"
-        >
-          {{ filename }}
-          <span
+        <div class="tab" [class.tab--active]="filename === artifactStore.activeFilename()">
+          <button type="button" class="tab__select" (click)="artifactStore.selectTab(filename)">
+            {{ filename }}
+          </button>
+          <button
+            type="button"
             class="tab__close"
-            (click)="$event.stopPropagation(); artifactStore.closeTab(filename)"
-            >×</span
+            [attr.aria-label]="'Close ' + filename + ' tab'"
+            (click)="artifactStore.closeTab(filename)"
           >
-        </button>
+            &times;
+          </button>
+        </div>
       }
     </div>
 

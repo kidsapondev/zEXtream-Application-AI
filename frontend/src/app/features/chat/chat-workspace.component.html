@@ -5,13 +5,13 @@
   (settings)="onSettings()"
 >
   <div sidebar-list>
-    @if (sessionListStore.sessions().length === 0) {
-      <p class="empty-hint">No chats yet — press + to start one.</p>
+    @if (sessionListStore.isLoading()) {
+      <p class="hint">Loading chats…</p>
+    } @else if (sessionListStore.sessions().length === 0) {
+      <p class="hint">No chats yet — press + to start one.</p>
     }
     @for (session of sessionListStore.sessions(); track session.id) {
-      <a class="session-item" [routerLink]="['/chat', session.id]" [class.session-item--active]="session.id === sessionId()">
-        {{ session.title }}
-      </a>
+      <app-session-list-item [session]="session" [active]="session.id === sessionId()" />
     }
   </div>
 
@@ -20,6 +20,20 @@
   </div>
 
   <div main>
+    @if (socketService.connectionState() !== 'connected') {
+      <div
+        class="connection-banner"
+        [class.connection-banner--reconnecting]="socketService.connectionState() === 'reconnecting'"
+        role="status"
+      >
+        {{
+          socketService.connectionState() === 'reconnecting'
+            ? 'Reconnecting…'
+            : 'Disconnected — trying to reconnect…'
+        }}
+      </div>
+    }
+
     @if (sessionId(); as id) {
       <div class="workspace-split" [class.workspace-split--with-editor]="artifactStore.hasArtifacts()">
         <div class="workspace-split__chat">
@@ -32,7 +46,7 @@
         }
       </div>
     } @else {
-      <p class="empty-hint">Select a chat, or press + to start a new one.</p>
+      <p class="hint">Select a chat, or press + to start a new one.</p>
     }
   </div>
 </ds-app-shell>

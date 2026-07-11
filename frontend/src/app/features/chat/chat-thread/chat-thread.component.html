@@ -1,5 +1,12 @@
 <div class="chat-thread">
-  <div class="chat-thread__messages">
+  <div class="chat-thread__messages" #messagesEl (scroll)="onMessagesScroll($event)">
+    @if (chatStore.isLoadingHistory()) {
+      <p class="hint">Loading conversation…</p>
+    } @else if (chatStore.historyError(); as error) {
+      <p class="hint hint--error" role="alert">{{ error }}</p>
+    } @else if (chatStore.messages().length === 0) {
+      <p class="hint">No messages yet — say hello.</p>
+    }
     @for (message of chatStore.messages(); track message.id) {
       <div class="message" [class.message--user]="message.role === 'user'">
         <div class="message__bubble">
@@ -7,11 +14,11 @@
           @if (message.streamingStatus === 'streaming') {
             <span class="message__streaming">
               generating…
-              <button type="button" (click)="stop(message.id)">Stop</button>
+              <button type="button" aria-label="Stop generating" (click)="stop(message.id)">Stop</button>
             </span>
           }
           @if (message.streamingStatus === 'error') {
-            <span class="message__error">{{ message.errorMessage }}</span>
+            <span class="message__error" role="alert">{{ message.errorMessage }}</span>
           }
         </div>
       </div>
@@ -27,6 +34,12 @@
       placeholder="Ask anything…"
       autocomplete="off"
     />
-    <button type="submit">Send</button>
+    <button
+      type="submit"
+      [disabled]="chatStore.isStreaming() || !draft().trim()"
+      [attr.title]="chatStore.isStreaming() ? 'Wait for the current response to finish' : null"
+    >
+      Send
+    </button>
   </form>
 </div>

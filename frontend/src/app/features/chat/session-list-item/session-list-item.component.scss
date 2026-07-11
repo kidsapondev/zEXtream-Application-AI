@@ -1,0 +1,126 @@
+:host {
+  display: block;
+}
+
+.session-item-row {
+  display: flex;
+  align-items: center;
+  border-radius: var(--radius-sm);
+
+  &:hover,
+  &:focus-within {
+    background: var(--color-hairline);
+
+    .session-item__actions {
+      opacity: 1;
+    }
+  }
+}
+
+.session-item-row--active {
+  background: var(--color-ink);
+
+  .session-item__link {
+    color: var(--color-canvas-raised);
+  }
+
+  &:hover,
+  &:focus-within {
+    background: var(--color-ink);
+  }
+
+  .icon-btn {
+    color: var(--color-canvas-raised);
+
+    &:hover:not(:disabled) {
+      color: var(--color-brand-yellow);
+    }
+  }
+}
+
+.session-item__link {
+  flex: 1;
+  min-width: 0;
+  display: block;
+  padding: var(--space-3);
+  font-size: 13px;
+  color: var(--color-ink);
+  text-decoration: none;
+}
+
+.session-item__title {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-item__actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 2px;
+  padding-right: var(--space-2);
+  opacity: 0;
+  transition: opacity 0.15s ease;
+
+  // Icon buttons are always reachable via keyboard even when not hovered,
+  // so keep them visible whenever one of them holds focus.
+  &:focus-within {
+    opacity: 1;
+  }
+
+  @media (max-width: 640px) {
+    // No hover on touch — keep the controls visible so they're actually usable.
+    opacity: 1;
+  }
+}
+
+.icon-btn {
+  all: unset;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+
+  &:hover:not(:disabled) {
+    background: var(--color-canvas-raised);
+    color: var(--color-ink);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--color-brand-yellow);
+    outline-offset: -1px;
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+}
+
+.icon-btn--danger:hover:not(:disabled) {
+  color: var(--color-status-negative);
+}
+
+.session-item__edit {
+  flex: 1;
+  min-width: 0;
+  margin: var(--space-1) var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  font-size: 13px;
+  font-family: var(--font-body);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-sm);
+  background: var(--color-canvas-raised);
+  color: var(--color-ink);
+  box-sizing: border-box;
+
+  &:focus {
+    outline: 2px solid var(--color-brand-yellow);
+    outline-offset: -1px;
+  }
+}

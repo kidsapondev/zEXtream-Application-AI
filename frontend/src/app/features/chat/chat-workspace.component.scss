@@ -1,25 +1,17 @@
-.empty-hint {
-  color: var(--color-text-muted);
-  font-size: 13px;
-  padding: var(--space-3);
-}
-
-.session-item {
-  display: block;
-  padding: var(--space-3);
+.connection-banner {
+  margin-bottom: var(--space-4);
+  padding: var(--space-2) var(--space-4);
   border-radius: var(--radius-sm);
-  font-size: 13px;
-  color: var(--color-ink);
-  text-decoration: none;
-
-  &:hover {
-    background: var(--color-hairline);
-  }
+  background: var(--color-status-negative);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  text-align: center;
 }
 
-.session-item--active {
-  background: var(--color-ink);
-  color: var(--color-canvas-raised);
+.connection-banner--reconnecting {
+  background: var(--color-status-pending);
+  color: var(--color-ink);
 }
 
 .link-button {

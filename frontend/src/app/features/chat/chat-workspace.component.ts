@@ -1,15 +1,17 @@
 import { Component, effect, inject, input } from '@angular/core';
-import { Router, RouterLink } from '@angular/router';
+import { Router } from '@angular/router';
 import { AppShellComponent } from '../../design-system/app-shell/app-shell.component';
 import { AuthStore } from '../../core/auth.store';
+import { SocketService } from '../../core/socket.service';
 import { SessionListStore } from './session-list.store';
+import { SessionListItemComponent } from './session-list-item/session-list-item.component';
 import { ChatThreadComponent } from './chat-thread/chat-thread.component';
 import { ArtifactStore } from '../code-editor/artifact.store';
 import { CodeEditorPanelComponent } from '../code-editor/code-editor-panel.component';
 
 @Component({
   selector: 'app-chat-workspace',
-  imports: [AppShellComponent, RouterLink, ChatThreadComponent, CodeEditorPanelComponent],
+  imports: [AppShellComponent, SessionListItemComponent, ChatThreadComponent, CodeEditorPanelComponent],
   templateUrl: './chat-workspace.component.html',
   styleUrl: './chat-workspace.component.scss',
 })
@@ -19,6 +21,7 @@ export class ChatWorkspaceComponent {
   protected readonly authStore = inject(AuthStore);
   protected readonly sessionListStore = inject(SessionListStore);
   protected readonly artifactStore = inject(ArtifactStore);
+  protected readonly socketService = inject(SocketService);
   private readonly router = inject(Router);
 
   constructor() {

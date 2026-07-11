@@ -1,0 +1,85 @@
+@if (editing()) {
+  <div class="session-item-row">
+    <input
+      #titleInput
+      class="session-item__edit"
+      type="text"
+      [ngModel]="draftTitle()"
+      (ngModelChange)="draftTitle.set($event)"
+      name="title"
+      aria-label="Chat title"
+      autocomplete="off"
+      (keydown.enter)="commitRename()"
+      (keydown.escape)="cancelRename()"
+      (blur)="commitRename()"
+    />
+  </div>
+} @else {
+  <div class="session-item-row" [class.session-item-row--active]="active()">
+    <a class="session-item__link" [routerLink]="['/chat', session().id]">
+      <span class="session-item__title">{{ session().title }}</span>
+    </a>
+
+    <div class="session-item__actions">
+      <button
+        type="button"
+        class="icon-btn"
+        aria-label="Rename chat"
+        [disabled]="busy()"
+        (click)="startRename($event)"
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+          <path
+            d="M4 20h4L18.5 9.5a2.121 2.121 0 0 0-3-3L5 17v3Z"
+            stroke="currentColor"
+            stroke-width="1.5"
+            stroke-linejoin="round"
+          />
+        </svg>
+      </button>
+
+      <button
+        type="button"
+        class="icon-btn"
+        aria-label="Archive chat"
+        [disabled]="busy()"
+        (click)="archive($event)"
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+          <rect x="3" y="4" width="18" height="4" rx="1" stroke="currentColor" stroke-width="1.5" />
+          <path d="M5 8v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8" stroke="currentColor" stroke-width="1.5" />
+          <path d="M10 12h4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+        </svg>
+      </button>
+
+      <button
+        type="button"
+        class="icon-btn icon-btn--danger"
+        aria-label="Delete chat"
+        [disabled]="busy()"
+        (click)="requestDelete($event)"
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+          <path d="M4 7h16" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+          <path
+            d="M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2m-8 0 1 12a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1l1-12"
+            stroke="currentColor"
+            stroke-width="1.5"
+            stroke-linejoin="round"
+          />
+        </svg>
+      </button>
+    </div>
+  </div>
+}
+
+<ds-confirm-dialog
+  [open]="confirmingDelete()"
+  title="Delete this chat?"
+  [message]="'“' + session().title + '” and all of its messages will be permanently deleted.'"
+  confirmLabel="Delete"
+  cancelLabel="Cancel"
+  [danger]="true"
+  (confirmed)="confirmDelete()"
+  (cancelled)="cancelDelete()"
+/>

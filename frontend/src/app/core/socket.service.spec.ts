@@ -13,9 +13,17 @@ const socket = {
     this.connected = false;
     return this;
   }),
+  on: vi.fn(),
+  io: { on: vi.fn() },
 } as unknown as Socket;
 
 const socketFactory = vi.fn(() => socket);
+
+/** Finds the callback a test previously registered via `socket.on(event, cb)` or `socket.io.on(event, cb)`. */
+function findHandler(mock: Socket['on'] | Socket['io']['on'], event: string): (() => void) | undefined {
+  const calls = (mock as unknown as { mock: { calls: [string, () => void][] } }).mock.calls;
+  return calls.find(([registeredEvent]) => registeredEvent === event)?.[1];
+}
 
 describe('SocketService', () => {
   beforeEach(() => {
@@ -60,5 +68,29 @@ describe('SocketService', () => {
     service.disconnect();
 
     expect(socket.disconnect).toHaveBeenCalledOnce();
+    expect(service.connectionState()).toBe('disconnected');
+  });
+
+  it('starts disconnected and tracks connect/disconnect lifecycle events', () => {
+    const service = TestBed.inject(SocketService);
+    service.connect();
+    expect(service.connectionState()).toBe('disconnected');
+
+    findHandler(socket.on, 'connect')?.();
+    expect(service.connectionState()).toBe('connected');
+
+    findHandler(socket.on, 'disconnect')?.();
+    expect(service.connectionState()).toBe('disconnected');
+  });
+
+  it('reports reconnecting while the manager retries, then connected once it succeeds', () => {
+    const service = TestBed.inject(SocketService);
+    service.connect();
+
+    findHandler(socket.io.on, 'reconnect_attempt')?.();
+    expect(service.connectionState()).toBe('reconnecting');
+
+    findHandler(socket.io.on, 'reconnect')?.();
+    expect(service.connectionState()).toBe('connected');
   });
 });
