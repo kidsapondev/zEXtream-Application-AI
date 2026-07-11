@@ -1,0 +1,34 @@
+# Optional overlay that exposes the stack on a public domain via a Cloudflare Tunnel
+# instead of publishing a host port — the right fit for a home server with no public/
+# static IP or open router ports (works behind CGNAT too). `cloudflared` only makes
+# outbound connections to Cloudflare's edge; nothing needs to be forwarded on the
+# router, and no cert is provisioned locally (Cloudflare terminates TLS).
+#
+# Setup (one-time, in the Cloudflare dashboard — cannot be scripted from here):
+#   1. Add the domain to a Cloudflare account and repoint its nameservers at
+#      Cloudflare (via the domain's registrar).
+#   2. Zero Trust dashboard > Networks > Tunnels > Create a tunnel (type:
+#      Cloudflared) > name it > copy the token it shows you.
+#   3. In the tunnel's "Public Hostname" tab, add a hostname (e.g. the bare
+#      domain or a subdomain) routing to service `http://frontend:8080` — this
+#      is the same origin `docker-compose.prod.yml` publishes on host port 80,
+#      just reached through the tunnel instead of a published port.
+#   4. Put the copied token in `.env` as CLOUDFLARE_TUNNEL_TOKEN (see
+#      .env.example).
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml \
+#     -f docker-compose.cloudflare.yml up -d --build
+#
+# frontend's `ports: ['80:8080']` from docker-compose.prod.yml stays in effect
+# alongside this overlay; drop it in a local override if the host itself
+# shouldn't also answer on :80.
+services:
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}
+    depends_on:
+      - frontend
+    networks:
+      - appnet

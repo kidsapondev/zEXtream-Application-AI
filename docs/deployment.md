@@ -98,6 +98,50 @@ The production frontend image is `nginxinc/nginx-unprivileged`
 so this is invisible from outside; it only matters if you're editing
 `frontend/nginx.conf` or debugging inside the container directly.
 
+## Exposing the stack on a public domain (Cloudflare Tunnel)
+
+The base setup above only serves the app on `http://<host>` (port 80, no
+TLS) — fine for a LAN, not for a real domain. For a **home server** without a
+public/static IP or open router ports (including behind CGNAT),
+`docker-compose.cloudflare.yml` adds a `cloudflared` container that opens an
+outbound-only connection to Cloudflare's edge; Cloudflare terminates TLS and
+routes traffic for your domain into the tunnel, so nothing needs to be
+forwarded on the router and no certificate is managed on this host.
+
+One-time setup in the Cloudflare dashboard (not scriptable from here — needs
+your account):
+
+1. Add the domain to a Cloudflare account and repoint its nameservers at
+   Cloudflare via the domain's registrar.
+2. Zero Trust dashboard > **Networks > Tunnels** > Create a tunnel
+   (Cloudflared) > copy the token it shows.
+3. In the tunnel's **Public Hostname** tab, add a hostname (e.g. the bare
+   domain) routed to service `http://frontend:8080` — the same origin
+   `docker-compose.prod.yml` already publishes on host port 80, just reached
+   through the tunnel instead of a published port.
+4. Put the token in `.env` as `CLOUDFLARE_TUNNEL_TOKEN` (see
+   `.env.example`).
+
+Then bring the stack up with the extra overlay:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.prod.yml \
+  -f docker-compose.cloudflare.yml up -d --build
+```
+
+No other app config changes are needed: `frontend/nginx.conf` already
+redirects to HTTPS off `X-Forwarded-Proto` (which Cloudflare sets), and
+`CORS_ORIGIN`/`TRUST_PROXY` from the "Required `.env` values" table above
+still apply unchanged — frontend and backend remain same-origin behind
+nginx, cloudflared just replaces the published host port as the entry point.
+Verify `req.ip` in backend logs reflects real client IPs (not the
+`cloudflared`/nginx container) after switching this on, since it's an extra
+hop that wasn't present when this was tested.
+
+If the domain later moves to a VPS with a real public IP instead of a home
+server, drop this overlay and terminate TLS with a conventional
+reverse proxy/load balancer in front of the published port 80 instead.
+
 ## Rollback
 
 There is no automated one-command rollback — this is a plain

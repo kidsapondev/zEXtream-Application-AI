@@ -69,6 +69,7 @@ zEXtream-Application-AI/
 ├── docker-compose.yml           # Base services
 ├── docker-compose.override.yml  # Development overrides
 ├── docker-compose.prod.yml      # Production overrides
+├── docker-compose.cloudflare.yml # Optional Cloudflare Tunnel overlay (docs/deployment.md)
 ├── pnpm-workspace.yaml
 └── package.json
 ```

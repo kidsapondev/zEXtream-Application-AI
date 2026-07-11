@@ -50,8 +50,13 @@ services:
     # frontend/Dockerfile and frontend/nginx.conf.
     ports:
       - '80:8080'
+    # 127.0.0.1, not localhost: this image's /etc/hosts resolves "localhost" to ::1
+    # first, but nginx only binds 0.0.0.0:8080 (IPv4), not [::]:8080 — wget then hits
+    # connection refused on ::1 and never falls back to IPv4, so the container reports
+    # unhealthy despite serving real traffic fine (confirmed while wiring up the
+    # Cloudflare Tunnel overlay: external requests through frontend worked throughout).
     healthcheck:
-      test: ['CMD-SHELL', 'wget -qO- http://localhost:8080/ || exit 1']
+      test: ['CMD-SHELL', 'wget -qO- http://127.0.0.1:8080/ || exit 1']
       interval: 10s
       timeout: 5s
       retries: 5
