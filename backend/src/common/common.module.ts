@@ -1,4 +1,5 @@
 import { Global, Module } from '@nestjs/common';
+import { APP_FILTER } from '@nestjs/core';
 import { ScheduleModule } from '@nestjs/schedule';
 import { AuditLogService } from './audit-log.service';
 import { AppShutdownService } from './app-shutdown.service';
@@ -6,6 +7,8 @@ import { MetricsService } from './metrics.service';
 import { MetricsMiddleware } from './metrics.middleware';
 import { MetricsController } from './metrics.controller';
 import { RefreshTokenCleanupService } from './refresh-token-cleanup.service';
+import { PublicConfigController } from './public-config.controller';
+import { SentryExceptionFilter } from './sentry-exception.filter';
 
 /**
  * Cross-cutting production-readiness concerns that don't belong to any one feature
@@ -23,13 +26,14 @@ import { RefreshTokenCleanupService } from './refresh-token-cleanup.service';
 @Global()
 @Module({
   imports: [ScheduleModule.forRoot()],
-  controllers: [MetricsController],
+  controllers: [MetricsController, PublicConfigController],
   providers: [
     AuditLogService,
     AppShutdownService,
     MetricsService,
     MetricsMiddleware,
     RefreshTokenCleanupService,
+    { provide: APP_FILTER, useClass: SentryExceptionFilter },
   ],
   exports: [AuditLogService, MetricsService, MetricsMiddleware],
 })

@@ -6,6 +6,10 @@ import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import { Logger } from 'nestjs-pino';
 import { AppModule } from './app.module';
+import { initSentry } from './common/sentry';
+
+// Must run before NestFactory.create() — see initSentry()'s own comment.
+initSentry();
 
 // Explicit REST body-size cap. Express/body-parser's own default is ~100kb, which is
 // undocumented-by-omission and easy to accidentally outgrow; chat messages and artifact
