@@ -59,6 +59,41 @@ describe('artifact input validation', () => {
 });
 
 describe('ArtifactsService', () => {
+  describe('getRevisions', () => {
+    it('omits take/skip when called without pagination (backward compatible)', async () => {
+      const prisma = {
+        codeArtifact: { findMany: jest.fn().mockResolvedValue([]) },
+      };
+      const service = new ArtifactsService(prisma as never);
+
+      await service.getRevisions('session-1', 'src/app.ts');
+
+      expect(prisma.codeArtifact.findMany).toHaveBeenCalledWith({
+        where: { sessionId: 'session-1', filename: 'src/app.ts' },
+        orderBy: { revision: 'asc' },
+      });
+    });
+
+    it('applies take/skip when pagination is provided', async () => {
+      const prisma = {
+        codeArtifact: { findMany: jest.fn().mockResolvedValue([]) },
+      };
+      const service = new ArtifactsService(prisma as never);
+
+      await service.getRevisions('session-1', 'src/app.ts', {
+        take: 10,
+        skip: 5,
+      });
+
+      expect(prisma.codeArtifact.findMany).toHaveBeenCalledWith({
+        where: { sessionId: 'session-1', filename: 'src/app.ts' },
+        orderBy: { revision: 'asc' },
+        take: 10,
+        skip: 5,
+      });
+    });
+  });
+
   it('rejects invalid revisions before opening a database transaction', async () => {
     const prisma = { $transaction: jest.fn() };
     const service = new ArtifactsService(prisma as never);

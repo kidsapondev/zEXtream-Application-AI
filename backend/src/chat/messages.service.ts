@@ -14,10 +14,20 @@ export const MAX_CHAT_MESSAGE_BYTES = 32 * 1024;
 export class MessagesService {
   constructor(private readonly prisma: PrismaService) {}
 
-  listForSession(sessionId: string) {
+  /**
+   * `pagination` is optional. `ChatGateway` calls this with only `sessionId`
+   * to build full AI context (it needs the entire history, unpaginated) —
+   * that call must keep returning every message, so omitting `pagination`
+   * here issues the exact same query as before pagination existed.
+   */
+  listForSession(
+    sessionId: string,
+    pagination?: { take: number; skip: number },
+  ) {
     return this.prisma.message.findMany({
       where: { sessionId },
       orderBy: { createdAt: 'asc' },
+      ...(pagination ? { take: pagination.take, skip: pagination.skip } : {}),
     });
   }
 

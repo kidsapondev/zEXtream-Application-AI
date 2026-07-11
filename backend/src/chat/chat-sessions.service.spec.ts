@@ -5,6 +5,7 @@ describe('ChatSessionsService', () => {
   const prisma = {
     chatSession: {
       create: jest.fn(),
+      findMany: jest.fn(),
       findUnique: jest.fn(),
       delete: jest.fn(),
       update: jest.fn(),
@@ -26,6 +27,32 @@ describe('ChatSessionsService', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+  });
+
+  describe('listForUser', () => {
+    it('omits take/skip entirely when called without pagination (backward compatible)', async () => {
+      prisma.chatSession.findMany.mockResolvedValue([]);
+
+      await service.listForUser('user-1');
+
+      expect(prisma.chatSession.findMany).toHaveBeenCalledWith({
+        where: { userId: 'user-1', isArchived: false },
+        orderBy: { updatedAt: 'desc' },
+      });
+    });
+
+    it('applies take/skip when pagination is provided', async () => {
+      prisma.chatSession.findMany.mockResolvedValue([]);
+
+      await service.listForUser('user-1', { take: 10, skip: 20 });
+
+      expect(prisma.chatSession.findMany).toHaveBeenCalledWith({
+        where: { userId: 'user-1', isArchived: false },
+        orderBy: { updatedAt: 'desc' },
+        take: 10,
+        skip: 20,
+      });
+    });
   });
 
   describe('create', () => {

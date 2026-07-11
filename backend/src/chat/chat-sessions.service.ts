@@ -21,10 +21,16 @@ export class ChatSessionsService {
     private readonly providerSettingsService: ProviderSettingsService,
   ) {}
 
-  listForUser(userId: string) {
+  /**
+   * `pagination` is optional and, when omitted, this issues the exact same
+   * query as before pagination existed (no `take`/`skip` at all) — REST
+   * callers that don't pass `limit`/`offset` must see identical results.
+   */
+  listForUser(userId: string, pagination?: { take: number; skip: number }) {
     return this.prisma.chatSession.findMany({
       where: { userId, isArchived: false },
       orderBy: { updatedAt: 'desc' },
+      ...(pagination ? { take: pagination.take, skip: pagination.skip } : {}),
     });
   }
 

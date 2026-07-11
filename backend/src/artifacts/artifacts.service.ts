@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { CodeArtifact, Prisma } from '@prisma/client';
 import { posix as path } from 'node:path';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -109,30 +109,55 @@ export function assertArtifactRevisionQuota(
 export class ArtifactsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  /** Latest revision of every file touched in a session — feeds the file-tabs panel. */
-  async listLatestForSession(sessionId: string) {
-    const all = await this.prisma.codeArtifact.findMany({
-      where: { sessionId },
-      orderBy: { revision: 'desc' },
-    });
-    const latestByFilename = new Map<string, (typeof all)[number]>();
-    for (const artifact of all) {
-      if (!latestByFilename.has(artifact.filename)) {
-        latestByFilename.set(artifact.filename, artifact);
-      }
-    }
-    return [...latestByFilename.values()];
+  /**
+   * Latest revision of every file touched in a session — feeds the file-tabs
+   * panel and the AI context builder in `ChatGateway`.
+   *
+   * Uses `DISTINCT ON (filename) ... ORDER BY filename, revision DESC` so
+   * Postgres picks the single newest row per filename directly, instead of
+   * pulling every revision of every file into Node just to reduce them in
+   * memory (the previous implementation) — same "latest revision per
+   * filename" result, but O(files) rows transferred instead of O(revisions).
+   * Postgres-specific syntax is fine here: `schema.prisma`'s datasource is
+   * `postgresql` only, this app has no other target.
+   */
+  async listLatestForSession(sessionId: string): Promise<CodeArtifact[]> {
+    return this.prisma.$queryRaw<CodeArtifact[]>(Prisma.sql`
+      SELECT DISTINCT ON (filename)
+        id,
+        message_id AS "messageId",
+        session_id AS "sessionId",
+        filename,
+        language,
+        content,
+        revision,
+        parent_artifact_id AS "parentArtifactId",
+        origin,
+        created_at AS "createdAt"
+      FROM code_artifacts
+      WHERE session_id = ${sessionId}::uuid
+      ORDER BY filename, revision DESC
+    `);
   }
 
   getById(id: string) {
     return this.prisma.codeArtifact.findUnique({ where: { id } });
   }
 
-  getRevisions(sessionId: string, filename: string) {
+  /**
+   * `pagination` is optional; omitting `limit`/`offset` issues the exact same
+   * query as before pagination existed (all revisions, oldest first).
+   */
+  getRevisions(
+    sessionId: string,
+    filename: string,
+    pagination?: { take: number; skip: number },
+  ) {
     const normalizedFilename = normalizeArtifactFilename(filename);
     return this.prisma.codeArtifact.findMany({
       where: { sessionId, filename: normalizedFilename },
       orderBy: { revision: 'asc' },
+      ...(pagination ? { take: pagination.take, skip: pagination.skip } : {}),
     });
   }
 
