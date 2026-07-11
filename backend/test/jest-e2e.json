@@ -1,9 +1,27 @@
 {
-  "moduleFileExtensions": ["js", "json", "ts"],
-  "rootDir": ".",
-  "testEnvironment": "node",
-  "testRegex": ".e2e-spec.ts$",
-  "transform": {
-    "^.+\\.(t|j)s$": "ts-jest"
-  }
+  "projects": [
+    {
+      "displayName": "e2e",
+      "moduleFileExtensions": ["js", "json", "ts"],
+      "rootDir": "test",
+      "testEnvironment": "node",
+      "testRegex": ".e2e-spec.ts$",
+      "testPathIgnorePatterns": ["/node_modules/", "chat-stop.e2e-spec.ts$"],
+      "setupFiles": ["<rootDir>/setup-e2e.ts"],
+      "transform": {
+        "^.+\\.(t|j)s$": "ts-jest"
+      }
+    },
+    {
+      "displayName": "e2e-stop",
+      "moduleFileExtensions": ["js", "json", "ts"],
+      "rootDir": "test",
+      "testEnvironment": "node",
+      "testRegex": "chat-stop.e2e-spec.ts$",
+      "setupFiles": ["<rootDir>/setup-e2e.ts", "<rootDir>/setup-e2e-stop.ts"],
+      "transform": {
+        "^.+\\.(t|j)s$": "ts-jest"
+      }
+    }
+  ]
 }

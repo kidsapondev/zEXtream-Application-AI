@@ -1,16 +1,8 @@
-import { INestApplication, ValidationPipe } from '@nestjs/common';
-import { Test, TestingModule } from '@nestjs/testing';
-import cookieParser from 'cookie-parser';
-import request, { Response } from 'supertest';
+import { INestApplication } from '@nestjs/common';
+import request from 'supertest';
 import { App } from 'supertest/types';
-import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/prisma/prisma.service';
-
-interface RegisteredUser {
-  user: { id: string; email: string };
-  accessToken: string;
-  refreshCookie: string;
-}
+import { createE2eApp, RegisteredUser, registerUser } from './support/test-app';
 
 describe('Application security flows (e2e)', () => {
   let app: INestApplication<App>;
@@ -18,22 +10,7 @@ describe('Application security flows (e2e)', () => {
   const createdUserIds: string[] = [];
 
   beforeAll(async () => {
-    const moduleFixture: TestingModule = await Test.createTestingModule({
-      imports: [AppModule],
-    }).compile();
-
-    app = moduleFixture.createNestApplication();
-    app.setGlobalPrefix('api');
-    app.use(cookieParser());
-    app.useGlobalPipes(
-      new ValidationPipe({
-        whitelist: true,
-        forbidNonWhitelisted: true,
-        transform: true,
-      }),
-    );
-    await app.init();
-    prisma = app.get(PrismaService);
+    ({ app, prisma } = await createE2eApp());
   });
 
   afterEach(async () => {
@@ -47,40 +24,10 @@ describe('Application security flows (e2e)', () => {
     await app.close();
   });
 
-  function cookieFrom(response: Response): string {
-    const headers = response.headers as unknown as Record<
-      string,
-      string | string[] | undefined
-    >;
-    const header = headers['set-cookie'];
-    let cookie: unknown = header;
-    if (Array.isArray(header)) {
-      for (const value of header) {
-        if (typeof value === 'string') {
-          cookie = value;
-          break;
-        }
-      }
-    }
-    if (typeof cookie !== 'string') {
-      throw new Error('Response did not set a refresh cookie');
-    }
-    const separator = cookie.indexOf(';');
-    return separator >= 0 ? cookie.slice(0, separator) : cookie;
-  }
-
   async function register(label: string): Promise<RegisteredUser> {
-    const email = `${label}-${Date.now()}-${Math.random().toString(16).slice(2)}@example.com`;
-    const response = await request(app.getHttpServer())
-      .post('/api/auth/register')
-      .send({ email, password: 'IntegrationPassword123!', displayName: label })
-      .expect(201);
-    const body = response.body as {
-      user: { id: string; email: string };
-      accessToken: string;
-    };
-    createdUserIds.push(body.user.id);
-    return { ...body, refreshCookie: cookieFrom(response) };
+    const registered = await registerUser(app, label);
+    createdUserIds.push(registered.user.id);
+    return registered;
   }
 
   it('reports database readiness', async () => {
@@ -103,8 +50,7 @@ describe('Application security flows (e2e)', () => {
     ]);
 
     expect(responses.map((response) => response.status).sort()).toEqual([
-      201,
-      401,
+      201, 401,
     ]);
     const validDescendants = await prisma.refreshToken.count({
       where: { userId: user.user.id, revokedAt: null },
@@ -180,11 +126,19 @@ describe('Application security flows (e2e)', () => {
       .expect(200);
 
     expect(artifacts.body).toEqual([
-      expect.objectContaining({ id: latest.id, revision: 2, content: latest.content }),
+      expect.objectContaining({
+        id: latest.id,
+        revision: 2,
+        content: latest.content,
+      }),
     ]);
     expect(revisions.body).toEqual([
       expect.objectContaining({ id: first.id, revision: 1 }),
-      expect.objectContaining({ id: latest.id, revision: 2, parentArtifactId: first.id }),
+      expect.objectContaining({
+        id: latest.id,
+        revision: 2,
+        parentArtifactId: first.id,
+      }),
     ]);
   });
 
@@ -202,7 +156,9 @@ describe('Application security flows (e2e)', () => {
       where: { userId_provider: { userId: user.user.id, provider: 'openai' } },
     });
     expect(row).not.toBeNull();
-    expect(Buffer.from(row!.encryptedApiKey).toString('utf8')).not.toContain('test-openai-secret');
+    expect(Buffer.from(row!.encryptedApiKey).toString('utf8')).not.toContain(
+      'test-openai-secret',
+    );
 
     const settings = await request(app.getHttpServer())
       .get('/api/settings/providers')
@@ -222,7 +178,9 @@ describe('Application security flows (e2e)', () => {
       .expect({ success: true });
     await expect(
       prisma.providerCredential.findUnique({
-        where: { userId_provider: { userId: user.user.id, provider: 'openai' } },
+        where: {
+          userId_provider: { userId: user.user.id, provider: 'openai' },
+        },
       }),
     ).resolves.toBeNull();
   });

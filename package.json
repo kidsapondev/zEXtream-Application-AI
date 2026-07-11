@@ -10,6 +10,8 @@
     "dev:build": "docker compose up --build",
     "build": "pnpm --filter backend exec prisma generate && pnpm --filter backend build && pnpm --filter frontend build",
     "test": "pnpm --filter backend test --runInBand && pnpm --filter frontend exec ng test --watch=false",
+    "test:e2e": "pnpm --filter backend test:e2e",
+    "test:e2e:browser": "pnpm --filter e2e test:e2e:browser",
     "lint": "pnpm --filter backend exec eslint \"{src,apps,libs,test}/**/*.ts\"",
     "check": "pnpm run build && pnpm run test && pnpm run lint"
   }

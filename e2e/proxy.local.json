@@ -1,0 +1,13 @@
+{
+  "/api": {
+    "target": "http://127.0.0.1:3130",
+    "secure": false,
+    "changeOrigin": true
+  },
+  "/ws": {
+    "target": "http://127.0.0.1:3130",
+    "secure": false,
+    "changeOrigin": true,
+    "ws": true
+  }
+}
