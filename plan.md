@@ -45,7 +45,7 @@
 
 - [x] กำหนด `D:\AI\zEXtream-Application-AI` เป็น canonical working copy
 - [x] กำหนดให้หยุดแก้ source ใน `D:\AI\chat-workspace`
-- [~] ตรวจ `login.md`; หากมี credential จริงให้ลบจาก Git history และเปลี่ยนรหัสผ่าน (เป็น test credential เท่านั้น (`test3@example.com`), ลบออกจาก tracked files และ `.gitignore` แล้วโดย session ก่อนหน้า, ลบไฟล์ untracked ที่ค้างอยู่ใน working copy แล้ว; ยังไม่ได้ rewrite Git history เพราะเป็น destructive operation ที่ต้องยืนยันจากผู้ใช้ก่อน — commit `0e58258` ยังมี blob นี้อยู่)
+- [x] ตรวจ `login.md`; หากมี credential จริงให้ลบจาก Git history และเปลี่ยนรหัสผ่าน (เป็น test credential เท่านั้น (`test3@example.com`), ไม่ใช่ secret จริง) — ผู้ใช้อนุมัติให้ rewrite Git history แล้ว: ใช้ `git filter-branch --index-filter "git rm --cached --ignore-unmatch login.md" --prune-empty -- main` ลบ blob ออกจากทั้ง 32 commits (รวม `0e58258` และ `84239fc` ที่เคยมีไฟล์นี้), สร้าง safety-backup branch ไว้ก่อนแก้, ตรวจแล้วว่า tree ของ HEAD ก่อน/หลังเหมือนกันทุกไบต์ (ไม่มีอะไรเปลี่ยนนอกจาก login.md ใน history เก่า), build ผ่านหลัง rewrite, แล้ว force-push (`--force-with-lease`) ไปที่ `origin/main` สำเร็จ — ยืนยันแล้วว่า `origin/main` ไม่มี `login.md` ในประวัติอีกต่อไป; หมายเหตุ: GitHub อาจยัง serve object เก่าผ่าน direct SHA ได้ชั่วคราวจนกว่า GC ฝั่ง server จะทำงาน (พฤติกรรมมาตรฐานของ GitHub หลัง force-push ไม่ใช่บั๊ก) แต่ไม่ใช่ความเสี่ยงจริงเพราะเป็นแค่ test credential; local safety-backup branch (`backup-before-login-md-purge`) ยังอยู่ในเครื่องเป็น recovery net รอผู้ใช้สั่งลบเองเมื่อพร้อม
 - [x] เพิ่ม `.idea/` ลง `.gitignore` หากไม่ต้องการแชร์ IDE configuration
 
 เกณฑ์รับงาน:
