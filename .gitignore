@@ -15,6 +15,9 @@ login.md
 # Docker volumes bind-mounted for local dev only
 postgres-data/
 
+# Local secret files for docker-compose.secrets.yml — never commit real secrets
+/secrets/
+
 # Playwright (e2e/)
 /e2e/test-results/
 /e2e/playwright-report/

@@ -1,6 +1,7 @@
 {
   "name": "zextream-application-ai",
   "private": true,
+  "license": "UNLICENSED",
   "packageManager": "pnpm@11.11.0",
   "engines": {
     "node": ">=24"

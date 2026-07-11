@@ -2,6 +2,7 @@
   "name": "e2e",
   "version": "0.0.1",
   "private": true,
+  "license": "UNLICENSED",
   "description": "Repo-wide browser E2E suite (Playwright) driving the real Angular frontend against the real NestJS backend + Postgres. See README.md for how to run it.",
   "scripts": {
     "test:e2e:browser": "playwright test",

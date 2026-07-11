@@ -9,6 +9,7 @@
     "test": "ng test"
   },
   "private": true,
+  "license": "UNLICENSED",
   "packageManager": "pnpm@11.11.0",
   "dependencies": {
     "@angular/common": "^22.0.0",
@@ -18,6 +19,7 @@
     "@angular/platform-browser": "^22.0.0",
     "@angular/router": "^22.0.0",
     "@app/shared-types": "workspace:*",
+    "@sentry/angular": "^10.64.0",
     "monaco-editor": "^0.55.1",
     "rxjs": "~7.8.0",
     "socket.io-client": "^4.8.3",

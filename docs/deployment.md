@@ -2,10 +2,12 @@
 
 This covers deploying the stack (`postgres`, `migrate`, `backend`, `frontend`)
 from a clean checkout with `docker-compose.yml` + `docker-compose.prod.yml`,
-and how to roll back. It does **not** cover provisioning TLS, a secret
-manager, or CI image scanning — those need an infra/vendor decision only the
-project owner can make (see plan.md's Phase 7 → Deployment section for why
-they're deliberately left unchecked).
+and how to roll back, plus the optional file-based secrets overlay and error
+reporting (see below). It does **not** provision TLS certificates or pick a
+specific secret-manager/error-reporting *vendor* — those still need the
+project owner to choose a provider (Vault vs. AWS Secrets Manager, Sentry vs.
+Datadog, etc.); what's here is vendor-agnostic plumbing that works with
+whichever one gets chosen.
 
 ## Prerequisites
 
@@ -181,19 +183,60 @@ shared healthcheck definition in the base file wouldn't be correct for both.
 `postgres`'s healthcheck (`pg_isready`) was already in place before this pass
 and is the pattern the other two follow.
 
+## Secrets: file-based instead of plain environment variables
+
+`docker-compose.secrets.yml` is an optional overlay demonstrating
+Docker Compose's native `secrets:` support for `DATABASE_URL`,
+`JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`, and `API_KEY_ENCRYPTION_KEY`.
+Instead of the plain env vars in `.env`, the backend reads a
+`<KEY>_FILE` variable pointing at a file and uses that file's (trimmed)
+contents — see `backend/src/config/env.validation.ts`. A `_FILE` value
+always wins over a plain value of the same key if both are set.
+
+```bash
+mkdir -p secrets
+# real values, not the placeholders below — this directory is gitignored
+echo -n "postgresql://user:pass@postgres:5432/db" > secrets/database_url.txt
+echo -n "$(openssl rand -base64 48)" > secrets/jwt_access_secret.txt
+echo -n "$(openssl rand -base64 48)" > secrets/jwt_refresh_secret.txt
+echo -n "$(openssl rand -base64 32)" > secrets/api_key_encryption_key.txt
+
+docker compose -f docker-compose.yml -f docker-compose.prod.yml \
+  -f docker-compose.secrets.yml up -d --build
+```
+
+Verified while writing this: with the overlay active, `docker exec`
+into the backend container shows the secrets mounted at
+`/run/secrets/*`, and the app boots and reports `{"database":"connected"}`
+from `/api/health` using the file-supplied values.
+
+This is deliberately vendor-agnostic — Docker Compose secrets, Kubernetes
+Secrets mounted as files, a Vault agent template, and an AWS Secrets
+Manager sidecar all boil down to "a secret manager renders a value to a
+file on disk"; point the `file:` entries in `docker-compose.secrets.yml`
+at wherever your chosen manager writes instead of `./secrets/*.txt` and
+the same mechanism applies without any app code changes.
+
+## Error reporting (optional, off by default)
+
+Set `SENTRY_DSN` in `.env` to enable Sentry error reporting in both the
+backend (`backend/src/common/sentry.ts`, initialized in `main.ts` before
+anything else) and the frontend (`frontend/src/app/core/sentry.ts`,
+initialized in `main.ts`). Leaving `SENTRY_DSN` unset disables it
+entirely — no Sentry SDK network calls happen, nothing is sent anywhere.
+`SENTRY_ENVIRONMENT` (defaults to `NODE_ENV`) tags events so dev/staging/
+prod errors don't mix in one Sentry project. Swap in a different
+provider's SDK the same way if Sentry isn't the vendor you land on —
+both initializers are small, isolated, and only wired in behind the
+"is a DSN configured" check.
+
 ## Known gaps (not covered by this runbook)
 
 - **Zero-downtime deploys**: `docker compose up -d --build` stops and
   recreates containers; there's a brief window where `backend`/`frontend`
   are down between old and new. A blue/green or rolling-update setup would
   need an orchestrator this repo doesn't use.
-- **`backend/package.json`'s `start:prod` script** (`node dist/main`) has the
-  same stale path this runbook's Dockerfile fix addressed
-  (`backend/Dockerfile`'s prod-stage `CMD` now correctly points at
-  `dist/src/main.js` — `nest build`'s output mirrors `backend/`'s two
-  sibling TS roots, `src/` and `prisma.config.ts`, rather than flattening
-  `src/` into `dist/` directly). The Dockerfile is fixed; the npm script is
-  not, since `backend/package.json` was outside this pass's scope (owned by
-  another in-progress change). Anyone running `pnpm start:prod` directly
-  (outside Docker) will hit the same `Cannot find module 'dist/main.js'`
-  error until that script is corrected too.
+- **CI image scanning** now runs (`.github/workflows/ci.yml`, Trivy against
+  both built images) but only reports findings in the Actions log/Security
+  tab — it doesn't block a merge on vulnerabilities found, since deciding
+  a severity threshold that fails CI is a policy call for the project owner.

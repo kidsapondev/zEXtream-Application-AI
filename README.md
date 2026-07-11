@@ -679,4 +679,4 @@ docker compose logs migrate
 
 ## License
 
-ยังไม่ได้กำหนด license สำหรับ repository นี้ โดย `backend/package.json` ระบุ `UNLICENSED` จึงไม่ควรนำไปเผยแพร่หรือใช้งานต่อภายนอกโดยถือว่ามีสิทธิ์แบบ open source จนกว่าจะเพิ่มไฟล์ license อย่างชัดเจน
+Proprietary. ดูรายละเอียดใน [LICENSE](./LICENSE) — ไม่ใช่ open source, ทุก workspace package (`package.json`) ระบุ `"license": "UNLICENSED"` ตรงกัน

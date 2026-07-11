@@ -40,3 +40,39 @@ jobs:
 
       - name: Lint backend
         run: pnpm --filter backend exec eslint "{src,apps,libs,test}/**/*.ts"
+
+  image-scan:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      matrix:
+        image: [backend, frontend]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build ${{ matrix.image }} image
+        run: docker build -f ${{ matrix.image }}/Dockerfile -t ${{ matrix.image }}:ci .
+
+      # Reports vulnerabilities to the Actions log and GitHub's Security tab
+      # (via the SARIF upload below) without failing the build — picking a
+      # severity threshold that blocks a merge is a policy call for the
+      # project owner, not something to bake in unasked. See
+      # docs/deployment.md's "Error reporting" / secrets sections for the
+      # same reasoning applied to other infra/vendor decisions.
+      - name: Scan ${{ matrix.image }} image with Trivy
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ matrix.image }}:ci
+          format: sarif
+          output: trivy-${{ matrix.image }}.sarif
+          severity: CRITICAL,HIGH
+          exit-code: '0'
+
+      - name: Upload Trivy results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy-${{ matrix.image }}.sarif
+          category: trivy-${{ matrix.image }}
