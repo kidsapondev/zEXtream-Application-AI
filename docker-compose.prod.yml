@@ -23,6 +23,16 @@ services:
   backend:
     build:
       target: prod
+    # Compose `environment:` always wins over an image's baked-in `ENV`, so pinning
+    # NODE_ENV=production in backend/Dockerfile's prod stage alone isn't enough while
+    # docker-compose.yml passes NODE_ENV: ${NODE_ENV} through unconditionally — if the
+    # deployer's .env still has the base file's own default (NODE_ENV=development), the
+    # prod-stage image crash-loops on boot (logger.config.ts only skips the pino-pretty
+    # transport when NODE_ENV is exactly "production", and that devDependency isn't in
+    # this stage's pruned node_modules). Pin it here so this overlay is self-contained
+    # and doesn't depend on the deployer's .env agreeing with it.
+    environment:
+      NODE_ENV: production
     deploy:
       resources:
         limits:

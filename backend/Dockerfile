@@ -28,6 +28,15 @@ RUN pnpm exec prisma generate
 RUN pnpm run build
 
 FROM base AS prod
+# Default to production mode inside the image itself rather than relying solely on the
+# deployer passing NODE_ENV=production through compose/orchestrator env — this stage's
+# pruned node_modules (--prod --filter=backend...) never installs devDependencies like
+# pino-pretty, which logger.config.ts only references when NODE_ENV isn't "production".
+# Without this default, an operator who forgets to override NODE_ENV (e.g. still has
+# NODE_ENV=development in their .env, since that's docker-compose.yml's own default)
+# gets a crash-looping container instead of a working one — confirmed by reproducing it
+# directly against this stage. `environment:` in compose still overrides this if needed.
+ENV NODE_ENV=production
 COPY pnpm-workspace.yaml package.json pnpm-lock.yaml ./
 COPY packages/shared-types/package.json ./packages/shared-types/package.json
 COPY backend/package.json ./backend/package.json
