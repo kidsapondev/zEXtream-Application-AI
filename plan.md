@@ -2,7 +2,7 @@
 
 เอกสารนี้สรุปสิ่งที่พัฒนาเสร็จแล้ว งานที่ยังต้องตรวจยืนยัน และงานที่ควรทำต่อ โดยอ้างอิงจาก source code ปัจจุบัน, Git history, Claude session เดิม, Docker task output และผล build/test ที่ตรวจล่าสุด
 
-อัปเดตสถานะล่าสุด: 11 กรกฎาคม 2026 (Asia/Bangkok)
+อัปเดตสถานะล่าสุด: 11 กรกฎาคม 2026 (Asia/Bangkok) — Phase 0-7 ครบ `[x]` ทั้งหมดแล้ว
 
 ## สัญลักษณ์สถานะ
 
@@ -33,7 +33,7 @@
 - Path: `D:\AI\zEXtream-Application-AI`
 - Branch: `main`
 - Remote: `https://github.com/kidsapondev/zEXtream-Application-AI.git`
-- Commit ล่าสุด ณ เวลาอัปเดตแผน: `46a0dd3` — `[EDIT] Plan`
+- Commit ล่าสุด ณ เวลาอัปเดตแผน: `73c6427` — `[ADD] Real-socket coverage for Ollama HTTP-error/malformed-stream; close out Phase 7`
 - Local branch ตรงกับ `origin/main`
 
 ### Working copy เดิมที่เลิกใช้
@@ -475,7 +475,7 @@
 - [x] Backend build ผ่าน
 - [x] Frontend build ผ่าน
 - [x] Backend ESLint ทั้ง repository ผ่านแล้ว (`npx eslint .` → 0 errors, 0 warnings) — เดิมรายงาน 170 problems แต่ ~146 เป็น false positive จาก `dist/` (build output ที่ eslint ไม่เคยถูกกันไว้ ทำให้ parse ไฟล์ compiled ที่ไม่อยู่ใน tsconfig rootDir ไม่ได้) แก้โดยเพิ่ม `dist/**` เข้า `ignores` ใน `eslint.config.mjs`; อีก 24 ปัญหาที่เหลือเป็นของจริงในซอร์สโค้ด แก้ครบแล้ว — ส่วนใหญ่เป็น prettier formatting (`--fix` อัตโนมัติ) และ type-safety จริง 8 จุด: `current-user.decorator.ts`/`jwt-refresh.strategy.ts` เคย unsafe-assign `any` จาก `getRequest()`/`req.cookies` ที่ไม่มี type แก้ด้วยการ type ตัวแปรกลาง/narrow ด้วย `typeof` แทนที่จะ trust `any` เดิม, `artifacts.service.spec.ts` 2 จุด restructure assertion จาก object-literal property ที่มี `expect.objectContaining()` ฝังอยู่ (ซึ่ง `no-unsafe-assignment` มองว่าเป็น any-assignment) เป็นการ cast `mock.calls[0]` ด้วย `as` แล้ว assert field ตรง ๆ, `chat.gateway.spec.ts` 2 จุดเป็น async generator mock ที่ไม่มี `await` จริงข้างใน แก้โดยถอด `async` ออก (เหลือเป็น sync generator ธรรมดา ซึ่ง `for await...of` ฝั่ง consumer ใช้งานได้เหมือนเดิมอยู่แล้ว) — ระหว่างแก้เจอว่า generator ตัวอื่นที่ยังมี `await` จริงถูก script เผลอแก้ไปด้วย (`replace_all`) ต้องแก้กลับเฉพาะตัวนั้น ตรวจสอบด้วย `tsc --noEmit` ยืนยันว่าไม่มีที่ไหนพังหลงเหลือ; build + unit test (162/162) + e2e (53/53) ผ่านหมดหลังแก้
-- [~] Test suite ยังไม่ครอบคลุม business logic หลัก แต่มี auth/stream/socket security coverage เพิ่มแล้ว
+- [x] Test suite ครอบคลุม business logic หลักแล้ว — เดิมบรรทัดนี้ค้างมาจากรอบก่อนที่ checklist ด้านล่าง ("Unit tests ที่ควรเพิ่มก่อน"/"Integration tests"/"Browser E2E") ยังไม่ครบ ตอนนี้ทุกรายการในสามหมวดนั้น `[x]` แล้วจริง (backend unit 162, e2e 55 ข้าม 3 Jest projects, frontend unit 45, Playwright browser e2e 5 ผ่าน + 2 skip เพราะต้องมี Ollama จริง) — ปรับให้ตรงกับสถานะจริงด้านล่าง
 
 ### Unit tests ที่ควรเพิ่มก่อน
 
