@@ -23,7 +23,7 @@
     <button type="button" class="link-button" (click)="onLogout()">Sign out</button>
   </div>
 
-  <div main>
+  <div main class="chat-main">
     @if (socketService.connectionState() !== 'connected') {
       <div
         class="connection-banner"

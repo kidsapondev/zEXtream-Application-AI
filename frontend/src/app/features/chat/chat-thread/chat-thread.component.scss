@@ -6,15 +6,47 @@
 
 .chat-thread__messages {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
+  overflow-x: hidden;
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
   padding-bottom: var(--space-4);
+  // Thin, low-contrast scrollbar rather than the platform default — the
+  // messages panel scrolls often (every new reply), so a heavy scrollbar
+  // would be a constant visual distraction.
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-hairline) transparent;
+
+  &::-webkit-scrollbar {
+    width: 8px;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    background: var(--color-hairline);
+    border-radius: var(--radius-pill);
+  }
+
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+}
+
+@keyframes message-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .message {
   display: flex;
+  animation: message-enter 0.18s ease-out;
 }
 
 .message--user {
@@ -22,11 +54,12 @@
 }
 
 .message__bubble {
-  max-width: 70ch;
+  max-width: min(70ch, 100%);
   background: var(--color-canvas-raised);
   border: 1px solid var(--color-hairline);
   border-radius: var(--radius-md);
   padding: var(--space-3) var(--space-4);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
 }
 
 .message--user .message__bubble {
@@ -37,6 +70,7 @@
 .message__content {
   margin: 0;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
   font-size: 14px;
   line-height: 1.5;
 }
@@ -76,15 +110,19 @@
 
   input {
     flex: 1;
-    font-size: 14px;
+    // 16px, not 14px: anything smaller makes iOS Safari auto-zoom the page
+    // on focus, which is jarring on a field the user taps constantly.
+    font-size: 16px;
     padding: var(--space-3);
     border: 1px solid var(--color-hairline);
     border-radius: var(--radius-sm);
     background: var(--color-canvas-raised);
+    transition: border-color 0.15s ease;
 
     &:focus {
       outline: 2px solid var(--color-brand-yellow);
       outline-offset: -1px;
+      border-color: var(--color-brand-yellow);
     }
   }
 
@@ -96,6 +134,17 @@
     padding: 0 var(--space-5);
     font-weight: 700;
     cursor: pointer;
+    transition:
+      opacity 0.15s ease,
+      transform 0.1s ease;
+
+    &:hover:not(:disabled) {
+      opacity: 0.85;
+    }
+
+    &:active:not(:disabled) {
+      transform: scale(0.97);
+    }
 
     &:disabled {
       opacity: 0.5;
@@ -106,5 +155,11 @@
       outline: 2px solid var(--color-brand-yellow);
       outline-offset: 2px;
     }
+  }
+}
+
+@media (max-width: 640px) {
+  .chat-thread__composer button {
+    padding: 0 var(--space-4);
   }
 }

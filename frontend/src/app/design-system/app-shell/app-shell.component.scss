@@ -8,7 +8,20 @@
 .app-shell__main {
   flex: 1;
   min-width: 0;
-  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  // Was `overflow: hidden`, which silently clipped any page's content once it
+  // grew taller than the viewport instead of scrolling it — on the chat page
+  // specifically this clipped the message list *and* the composer below it
+  // as the conversation grew, since nothing in the height chain down to
+  // .chat-thread__messages was actually bounded (see chat-workspace's own
+  // .chat-main fix). `overflow-y: auto` makes this the sane default for any
+  // page that doesn't establish its own internal scroll region (e.g.
+  // settings, whose content just needs normal page scrolling); pages that do
+  // establish one (chat) end up exactly filling this container, so no
+  // scrollbar appears here and the inner region scrolls instead.
+  overflow-y: auto;
+  overflow-x: hidden;
   padding: var(--space-6);
   box-sizing: border-box;
 
