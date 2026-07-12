@@ -115,6 +115,24 @@ export const envSchema = z.object({
     (value) => (value === '' ? undefined : value),
     z.string().optional(),
   ),
+  // Comma-separated list of emails that AdminBootstrapService idempotently keeps as
+  // full-permission admins (re-applied on every startup and right after that email
+  // registers) — see backend/src/admin/admin-bootstrap.service.ts. Meant for
+  // dev/staging so a known test account can always drive the backoffice; leave unset
+  // (or empty) in production once real admins are provisioned through the backoffice
+  // itself, since any email in this list regains super-admin on every restart no
+  // matter how its permissions were changed through the UI.
+  BOOTSTRAP_ADMIN_EMAILS: z
+    .string()
+    .optional()
+    .transform((value) =>
+      value
+        ? value
+            .split(',')
+            .map((email) => email.trim().toLowerCase())
+            .filter(Boolean)
+        : [],
+    ),
 });
 
 export type EnvConfig = z.infer<typeof envSchema>;

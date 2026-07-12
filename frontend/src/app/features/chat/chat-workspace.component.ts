@@ -120,6 +120,10 @@ export class ChatWorkspaceComponent {
     await this.router.navigateByUrl('/settings/providers');
   }
 
+  async onAdmin() {
+    await this.router.navigateByUrl('/admin');
+  }
+
   async onLogout() {
     await this.authStore.logout();
     await this.router.navigateByUrl('/login');

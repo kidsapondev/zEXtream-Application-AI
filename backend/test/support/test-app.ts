@@ -98,10 +98,18 @@ export function nextTestIp(): string {
   return `10.${(ipCounter >> 16) & 255}.${(ipCounter >> 8) & 255}.${ipCounter & 255}`;
 }
 
+/**
+ * New accounts register as `role: 'guest'` (see GuestBlockGuard) and can't use any
+ * resource endpoint until an admin activates them — which would break nearly every other
+ * e2e spec that registers a user purely as test setup and immediately expects it to be
+ * able to create sessions, etc. So this helper promotes to `'user'` right after
+ * registering by default; pass `opts.role: 'guest'` to keep the real just-registered
+ * state for tests that specifically exercise guest-blocking (see admin.e2e-spec.ts).
+ */
 export async function registerUser(
   app: INestApplication<App>,
   label: string,
-  opts: { ip?: string; password?: string } = {},
+  opts: { ip?: string; password?: string; role?: 'guest' | 'user' } = {},
 ): Promise<RegisteredUser> {
   const email = `${label}-${Date.now()}-${Math.random().toString(16).slice(2)}@example.com`;
   const password = opts.password ?? 'IntegrationPassword123!';
@@ -114,6 +122,15 @@ export async function registerUser(
     user: { id: string; email: string };
     accessToken: string;
   };
+
+  if ((opts.role ?? 'user') === 'user') {
+    const prisma = app.get(PrismaService);
+    await prisma.user.update({
+      where: { id: body.user.id },
+      data: { role: 'user' },
+    });
+  }
+
   return { ...body, refreshCookie: cookieFrom(response) };
 }
 

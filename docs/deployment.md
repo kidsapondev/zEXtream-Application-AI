@@ -32,6 +32,7 @@ values — the app will run with the placeholders, but they're insecure:
 | `NODE_ENV`               | **Must be `production`** for the prod image — see "NODE_ENV must be production" below.                      |
 | `CORS_ORIGIN`            | Leave empty/unset in prod (frontend+backend are same-origin behind nginx) rather than pointing at `localhost:4200`. |
 | `TRUST_PROXY`            | `1` in prod (nginx is one hop in front of the backend) so `req.ip` reflects the real client, not the nginx container. |
+| `BOOTSTRAP_ADMIN_EMAILS` | See "Getting your first admin account" below — every new registration defaults to a locked-out `guest` role, so this is how you get a working admin without a chicken-and-egg problem. |
 
 ### NODE_ENV must be `production`
 
@@ -45,6 +46,15 @@ while verifying this runbook). With `NODE_ENV=production` the backend emits
 structured JSON logs instead, which is also what you want in production
 regardless of this crash — pretty-printed logs aren't worth parsing at
 runtime.
+
+### Getting your first admin account
+
+New registrations default to `role: 'guest'` (see `GuestBlockGuard`) — they can log in but can't use chat, artifacts, or provider settings until an admin promotes them. On a fresh deployment there's no admin yet, so:
+
+1. Set `BOOTSTRAP_ADMIN_EMAILS` in `.env` to the email you're about to register (comma-separated if more than one).
+2. Deploy/start the backend normally, then register that account through the app as usual.
+3. `AdminBootstrapService` idempotently grants that email full admin + every backoffice permission — both at every backend startup and immediately after that email registers, so it works whether you set the env var before or after the account exists.
+4. Once you have real admins provisioned through the backoffice itself (`/admin/users`), clear `BOOTSTRAP_ADMIN_EMAILS` (or narrow it) — leaving an email in that list means it always regains full admin on every restart, no matter what the backoffice UI was used to change about it. See `docs/threat-model.md` → "Backoffice privilege escalation" for the full rationale.
 
 ## Deploy from a clean checkout
 
@@ -141,6 +151,54 @@ hop that wasn't present when this was tested.
 If the domain later moves to a VPS with a real public IP instead of a home
 server, drop this overlay and terminate TLS with a conventional
 reverse proxy/load balancer in front of the published port 80 instead.
+
+## Instant frontend redeploys (`docker-compose.deployment.yml`)
+
+By default the frontend's static files are baked into the image at build
+time (`COPY --from=build ... /usr/share/nginx/html`, `frontend/Dockerfile`),
+so any frontend-only change needs a full `up -d --build` (container
+recreate, brief downtime). `docker-compose.deployment.yml` is an optional
+overlay that bind-mounts `D:\AI\Deployment\chat.zextream.com` over that same
+path instead — nginx reads files off disk per request, so overwriting files
+there updates the live site instantly with **no rebuild, no restart, no
+downtime**. `nginx.conf`'s `root /usr/share/nginx/html;` needs no change,
+it's just now backed by a host folder instead of the image layer.
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.prod.yml \
+  -f docker-compose.cloudflare.yml -f docker-compose.deployment.yml up -d
+```
+
+To redeploy the frontend after this overlay is active, build the Angular app
+and sync the output into that folder (see
+`D:\AI\Deployment-infra\deploy.ps1`, part of the sibling multi-domain static
+site host covered below):
+
+```powershell
+pnpm --filter frontend build
+D:\AI\Deployment-infra\deploy.ps1 -Domain chat.zextream.com `
+  -SourceDir D:\AI\zEXtream-Application-AI\frontend\dist\frontend\browser
+```
+
+This overlay only affects the frontend's static assets. Backend changes
+still need a real image rebuild (`up -d --build`, no `docker-compose.deployment.yml`
+involved) since the backend runs compiled Node code, not static files.
+
+## Multi-domain static site host (`D:\AI\Deployment-infra`)
+
+A separate, generic `static-sites` nginx container (its own Compose project,
+`D:\AI\Deployment-infra\docker-compose.yml`) serves any number of *other*
+static sites from `D:\AI\Deployment\<domain>\` — one folder per domain,
+build output only. It routes purely off the `Host` header
+(`root /usr/share/nginx/html/$host`, validated against a hostname-shaped
+regex in `nginx.conf` to reject path-traversal attempts before they ever
+reach the filesystem), so adding a new domain needs no nginx config change:
+create the folder, run `deploy.ps1 -Domain <domain> -SourceDir <build dir>`,
+and add a Public Hostname route in the Cloudflare Tunnel dashboard pointing
+at `http://static-sites:8080`. It joins this project's `appnet` network as
+`external: true` so the existing `cloudflared` tunnel here can reach it too
+— no second tunnel needed. Only fits static sites (no backend/DB); anything
+with server-side logic needs its own Compose setup like this project's.
 
 ## Rollback
 

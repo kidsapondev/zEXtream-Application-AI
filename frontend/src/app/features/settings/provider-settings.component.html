@@ -1,7 +1,9 @@
 <ds-app-shell
   sidebarTitle="Settings"
   [userInitial]="(authStore.currentUser()?.displayName ?? 'U').charAt(0)"
+  [showAdmin]="authStore.isAdmin()"
   (newChat)="onNewChat()"
+  (admin)="onAdmin()"
 >
   <div sidebar-list>
     <a class="nav-item nav-item--active" routerLink="/settings/providers">AI Providers</a>

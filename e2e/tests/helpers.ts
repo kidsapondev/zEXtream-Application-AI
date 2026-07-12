@@ -1,4 +1,59 @@
 import { Page, expect } from '@playwright/test';
+import { Client } from 'pg';
+
+/** Same DB this suite's backend webServer points at — see playwright.config.ts's BACKEND_ENV. */
+const TEST_DATABASE_URL =
+  process.env.TEST_DATABASE_URL ??
+  'postgresql://chatapp:e2etestpassword@127.0.0.1:5455/chatapp';
+
+/**
+ * New accounts register as `role: 'guest'` (see GuestBlockGuard) and can't use chat until
+ * an admin promotes them — real coverage of that activation flow itself lives in
+ * `guest-activation.spec.ts`. Every other spec in this suite just needs a working,
+ * already-usable account as a fixture, so `registerNewUser` promotes directly via the DB
+ * rather than driving the backoffice UI every single time (mirrors the same shortcut
+ * `backend/test/support/test-app.ts`'s `registerUser()` takes, for the same reason).
+ */
+async function promoteToUser(email: string): Promise<void> {
+  const client = new Client({ connectionString: TEST_DATABASE_URL });
+  await client.connect();
+  try {
+    await client.query("UPDATE users SET role = 'user' WHERE email = $1", [
+      email,
+    ]);
+  } finally {
+    await client.end();
+  }
+}
+
+/**
+ * Promotes an account to admin and grants it the given permissions — used by
+ * `guest-activation.spec.ts` to get a real admin account that can drive the backoffice
+ * Users page through the browser.
+ */
+export async function promoteToAdmin(
+  email: string,
+  permissions: string[],
+): Promise<void> {
+  const client = new Client({ connectionString: TEST_DATABASE_URL });
+  await client.connect();
+  try {
+    const { rows } = await client.query<{ id: string }>(
+      'UPDATE users SET role = $1 WHERE email = $2 RETURNING id',
+      ['admin', email],
+    );
+    const userId = rows[0]?.id;
+    if (!userId) throw new Error(`promoteToAdmin: no user found for ${email}`);
+    for (const permission of permissions) {
+      await client.query(
+        'INSERT INTO admin_permission_grants (user_id, permission) VALUES ($1, $2)',
+        [userId, permission],
+      );
+    }
+  } finally {
+    await client.end();
+  }
+}
 
 /** A fresh, collision-free identity for one test run. */
 export function uniqueUser(label: string) {
@@ -12,10 +67,14 @@ export function uniqueUser(label: string) {
 
 /**
  * Drives the real registration form end to end (no API shortcuts): fills the
- * form, submits, and waits for the app to land on /chat authenticated.
- * RegisterComponent auto-logs the new user in and navigates to /chat, so
- * this is also the standard "get me a logged-in page" fixture for tests
- * that don't care about the login form specifically.
+ * form and submits it. A new account registers as `role: 'guest'` (see
+ * GuestBlockGuard) and lands on /account-pending, not /chat — this helper
+ * promotes it to `user` via the DB right after (see `promoteToUser`'s doc
+ * comment for why that's an acceptable shortcut here) and reloads, which is
+ * enough to land on /chat authenticated. This is the standard "get me a
+ * logged-in, chat-capable page" fixture for tests that don't care about
+ * registration or account-activation specifically — that flow has its own
+ * dedicated real-browser coverage in `guest-activation.spec.ts`.
  *
  * `POST /api/auth/register` is deliberately rate-limited to 3/min per IP
  * (see REGISTER_THROTTLE in auth.controller.ts — real anti-abuse policy,
@@ -40,11 +99,16 @@ export async function registerNewUser(
     await page.getByLabel('Email').fill(user.email);
     await page.getByLabel('Password').fill(user.password);
     await page.getByRole('button', { name: 'Create account' }).click();
-    const reachedChat = await page
-      .waitForURL(/\/chat/, { timeout: 8_000 })
+    const reachedPending = await page
+      .waitForURL(/\/account-pending/, { timeout: 8_000 })
       .then(() => true)
       .catch(() => false);
-    if (reachedChat) return user;
+    if (reachedPending) {
+      await promoteToUser(user.email);
+      await page.reload();
+      await expect(page).toHaveURL(/\/chat/, { timeout: 15_000 });
+      return user;
+    }
     if (attempt === maxAttempts) {
       throw new Error(
         `registerNewUser: still on ${page.url()} after ${maxAttempts} attempts (register throttle likely still active)`,

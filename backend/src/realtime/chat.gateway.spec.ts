@@ -42,6 +42,9 @@ describe('ChatGateway chat:stop', () => {
   const streamRegistry = {
     stop: jest.fn(),
   };
+  const usersService = {
+    findById: jest.fn(() => Promise.resolve({ role: 'user' })),
+  };
 
   const gateway = new ChatGateway(
     {} as never,
@@ -53,6 +56,7 @@ describe('ChatGateway chat:stop', () => {
     {} as never,
     {} as never,
     new WsRateLimiterService(),
+    usersService as never,
   );
 
   const client = { data: { userId: 'user-1' } } as unknown as Socket;
@@ -111,6 +115,9 @@ describe('ChatGateway chat:send failure handling', () => {
   const providerSettingsService = {
     getApiKeyForRuntime: jest.fn(),
   };
+  const usersService = {
+    findById: jest.fn(() => Promise.resolve({ role: 'user' })),
+  };
   const emit = jest.fn<(event: string, payload: unknown) => void>();
   const wsRateLimiter = new WsRateLimiterService();
 
@@ -124,6 +131,7 @@ describe('ChatGateway chat:send failure handling', () => {
     artifactsService as never,
     providerSettingsService as never,
     wsRateLimiter,
+    usersService as never,
   );
 
   gateway.server = { to: jest.fn(() => ({ emit })) } as never;
@@ -586,6 +594,7 @@ describe('ChatGateway auth is enforced by the gateway itself, independent of the
     artifactsService as never,
     {} as never,
     new WsRateLimiterService(),
+    {} as never,
   );
 
   const unauthenticatedClient = { data: {} } as unknown as Socket;

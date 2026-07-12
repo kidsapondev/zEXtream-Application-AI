@@ -11,6 +11,8 @@ import { createHash, randomUUID, timingSafeEqual } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { UsersService } from '../users/users.service';
 import { AuditLogService } from '../common/audit-log.service';
+import { AdminBootstrapService } from '../admin/admin-bootstrap.service';
+import { AdminPermissionsService } from '../admin/admin-permissions.service';
 
 export interface TokenRequestMeta {
   userAgent?: string;
@@ -83,6 +85,8 @@ export class AuthService {
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
     private readonly auditLog: AuditLogService,
+    private readonly adminBootstrapService: AdminBootstrapService,
+    private readonly adminPermissionsService: AdminPermissionsService,
   ) {
     this.accessSecret =
       this.configService.getOrThrow<string>('JWT_ACCESS_SECRET');
@@ -118,7 +122,12 @@ export class AuthService {
       });
       return null;
     }
-    return { id: user.id, email: user.email, displayName: user.displayName };
+    return {
+      id: user.id,
+      email: user.email,
+      displayName: user.displayName,
+      role: user.role,
+    };
   }
 
   async register(
@@ -132,11 +141,17 @@ export class AuthService {
     const passwordHash = await argon2.hash(data.password, {
       type: argon2.argon2id,
     });
-    const user = await this.usersService.create({
+    let user = await this.usersService.create({
       email: data.email,
       passwordHash,
       displayName: data.displayName,
     });
+    // No-op unless this email is in BOOTSTRAP_ADMIN_EMAILS — lets a configured test
+    // admin get full access immediately on sign-up instead of waiting for a restart.
+    await this.adminBootstrapService.ensureBootstrapAdmin(user.email);
+    const refreshed = await this.usersService.findById(user.id);
+    if (refreshed) user = refreshed;
+    const permissions = await this.adminPermissionsService.listForUser(user.id);
     const tokens = await this.issueTokenPair(user.id, user.email, meta);
     this.auditLog.record('auth.register', {
       userId: user.id,
@@ -144,22 +159,29 @@ export class AuthService {
       outcome: 'success',
     });
     return {
-      user: { id: user.id, email: user.email, displayName: user.displayName },
+      user: {
+        id: user.id,
+        email: user.email,
+        displayName: user.displayName,
+        role: user.role,
+        permissions,
+      },
       tokens,
     };
   }
 
   async login(
-    user: { id: string; email: string; displayName: string },
+    user: { id: string; email: string; displayName: string; role: string },
     meta: TokenRequestMeta,
   ) {
     const tokens = await this.issueTokenPair(user.id, user.email, meta);
+    const permissions = await this.adminPermissionsService.listForUser(user.id);
     this.auditLog.record('auth.login.success', {
       userId: user.id,
       ipAddress: meta.ipAddress ?? null,
       outcome: 'success',
     });
-    return { user, tokens };
+    return { user: { ...user, permissions }, tokens };
   }
 
   async refresh(

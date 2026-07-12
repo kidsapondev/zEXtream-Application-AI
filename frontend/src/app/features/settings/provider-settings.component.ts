@@ -69,6 +69,10 @@ export class ProviderSettingsComponent {
     await this.router.navigateByUrl('/login');
   }
 
+  async onAdmin() {
+    await this.router.navigateByUrl('/admin');
+  }
+
   async load(): Promise<void> {
     this.loading.set(true);
     this.error.set(null);

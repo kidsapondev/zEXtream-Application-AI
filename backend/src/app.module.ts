@@ -17,6 +17,8 @@ import { ChatModule } from './chat/chat.module';
 import { RealtimeModule } from './realtime/realtime.module';
 import { ArtifactsModule } from './artifacts/artifacts.module';
 import { ProviderSettingsModule } from './provider-settings/provider-settings.module';
+import { AdminPermissionsModule } from './admin/admin-permissions.module';
+import { AdminModule } from './admin/admin.module';
 
 @Module({
   imports: [
@@ -43,6 +45,7 @@ import { ProviderSettingsModule } from './provider-settings/provider-settings.mo
     ]),
     PrismaModule,
     CommonModule,
+    AdminPermissionsModule,
     HealthModule,
     UsersModule,
     AuthModule,
@@ -50,6 +53,7 @@ import { ProviderSettingsModule } from './provider-settings/provider-settings.mo
     ArtifactsModule,
     ProviderSettingsModule,
     RealtimeModule,
+    AdminModule,
   ],
   controllers: [AppController],
   providers: [

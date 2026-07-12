@@ -2,13 +2,15 @@ import { Injectable, computed, inject, signal } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
 import 'tslib';
+import type { AdminPermission, UserRole } from '@app/shared-types';
 import { SocketService } from './socket.service';
 
 export interface CurrentUser {
   id: string;
   email: string;
   displayName: string;
-  role: string;
+  role: UserRole;
+  permissions: AdminPermission[];
 }
 
 interface AuthResponse {
@@ -28,6 +30,12 @@ export class AuthStore {
   readonly accessToken = signal<string | null>(null);
   readonly currentUser = signal<CurrentUser | null>(null);
   readonly isAuthenticated = computed(() => this.accessToken() !== null);
+  readonly isAdmin = computed(() => this.currentUser()?.role === 'admin');
+  readonly isGuest = computed(() => this.currentUser()?.role === 'guest');
+
+  hasPermission(permission: AdminPermission): boolean {
+    return this.currentUser()?.permissions.includes(permission) ?? false;
+  }
 
   private inFlightRefresh: Promise<boolean> | null = null;
 

@@ -137,6 +137,81 @@ Artifacts are not written to the filesystem today (per this function's own
 doc comment) — this normalization is forward-looking protection for if/when
 artifact export-to-disk is added, and costs nothing to keep enforced now.
 
+## Backoffice privilege escalation
+
+**Risk**: a non-admin reaches `/api/admin/*`, an admin performs an action
+they don't have specific permission for, or an admin locks themselves (or
+the only other admin) out of the backoffice.
+
+**Mitigated** (see `backend/src/admin/`, added in the Phase 8 pass):
+
+- `PermissionsGuard` re-checks both `role === 'admin'` and the route's
+  specific required `AdminPermission` **from the database on every request**
+  — never from the JWT — so demoting a user or revoking a permission takes
+  effect on their very next request instead of waiting out the access
+  token's 15-minute lifetime.
+- Every route that mutates a user's status, role, or permissions rejects
+  (400) when the target is the caller themselves (`AdminUsersService`'s
+  `assertNotSelf()`), so an admin can't accidentally deactivate, demote, or
+  strip their own access.
+- Demoting an admin to `user` atomically revokes all of their permission
+  grants in the same transaction (`AdminUsersService.updateRole()`) — a
+  later re-promotion never silently resurrects a stale permission set.
+- Granting permissions is itself gated behind its own permission
+  (`users_manage_permissions`), so only an admin explicitly trusted with
+  that capability can expand another admin's access — an admin with, say,
+  only `users_view` cannot escalate anyone, including themselves.
+- Every mutation is written to `AdminAuditLogEntry` (actor, target, before/after)
+  so a privilege change is always attributable after the fact, independent of
+  the pino-only `AuditLogService` used for auth/provider events above.
+
+**Accepted risk / operational caveat — `BOOTSTRAP_ADMIN_EMAILS`**:
+`AdminBootstrapService` idempotently re-grants full admin + every permission
+to any email listed in this env var, on every backend startup and right
+after that email registers. This is intentional — it's the mechanism that
+keeps a known test account (`ake.kidsapon@gmail.com` in dev/staging) always
+usable for exercising the backoffice — but it means **any email in that list
+regains super-admin on every restart no matter what the backoffice UI was
+used to change about it**. This is safe as long as the list is treated as
+"who is allowed to always have full backoffice access," not as a one-time
+seed. Before a real production launch: clear `BOOTSTRAP_ADMIN_EMAILS` (or
+narrow it to accounts actually meant to be permanent super-admins) once real
+admins are provisioned through the backoffice itself — otherwise anyone who
+still controls one of those mailboxes has a standing, self-healing path back
+to full admin that the UI cannot revoke.
+
+## Unauthorized use by an unactivated (guest) account
+
+**Risk**: anyone can self-register a free account today (no invite code, no email
+verification) — without a gate, a freshly registered account would have the exact same
+resource access as a vetted one, letting an anonymous signup immediately use the app's
+compute (chat sessions against whichever AI providers are configured) or probe the API.
+
+**Mitigated**: new registrations default to `role: 'guest'` (`User.role`'s DB default,
+`backend/prisma/schema.prisma`), which can authenticate (so the frontend can show it a
+clear "contact an admin" screen — `AccountPendingComponent`) but is blocked from every
+actual resource:
+
+- REST: `GuestBlockGuard` (`backend/src/auth/guards/guest-block.guard.ts`), a global
+  `APP_GUARD`, default-denies any non-`@Public()` route for `role === 'guest'`, re-checked
+  from the database on every request. Only `GET /api/users/me` opts back in
+  (`@AllowGuest()`), so a guest can read its own status but touch nothing else.
+- WebSocket: every `ChatGateway` message handler calls `requireActiveUser()` before doing
+  any DB work, which rejects a guest's socket messages with a `WsException` even though
+  the socket itself connects successfully (see the code comment on `handleConnection` for
+  why the guest check deliberately isn't done at connect time — an async check there raced
+  against the client's `'connect'` event in testing and let a guest's first message slip
+  through before the disconnect landed).
+- Promoting a guest to `user`/`admin` goes through the same audited, self-lockout-guarded
+  `AdminUsersService.updateRole()` as any other role change (see above) — no separate,
+  less-scrutinized code path for activation.
+
+**Accepted, by design**: an activated account still has no further vetting beyond "an
+admin clicked Activate" — this app has no email verification or invite-code system.
+That's an intentional simplification (a human admin is the trust boundary), not an
+oversight; add verification separately if self-serve signup ever needs to scale beyond
+what a human can review.
+
 ## Summary table
 
 | Threat                | Status                                             |
@@ -148,3 +223,6 @@ artifact export-to-disk is added, and costs nothing to keep enforced now.
 | Prompt injection       | **Open / accepted risk** — no mitigation, blast radius limited by existing isolation |
 | Artifact filename traversal | Mitigated (`normalizeArtifactFilename`) |
 | `chat:stop` cross-user | **Open gap** — pre-existing, owned by `realtime/chat.gateway.ts` |
+| Backoffice privilege escalation | Mitigated (DB-checked permissions, self-lockout guard, audit trail) |
+| `BOOTSTRAP_ADMIN_EMAILS` standing access | **Accepted operational risk** — must be cleared/narrowed before real production launch |
+| Unactivated (guest) account resource use | Mitigated (`GuestBlockGuard` REST default-deny, per-handler WS check) |

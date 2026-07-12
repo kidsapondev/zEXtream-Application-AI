@@ -57,6 +57,71 @@ export interface ProviderSettingDto {
   models: string[];
 }
 
+/**
+ * `guest` is the default role for a freshly registered account — it can log in but cannot
+ * use any resource (chat, artifacts, provider settings) until an admin promotes it to
+ * `user` or `admin` via the backoffice. See GuestBlockGuard (backend) and
+ * `core/guest.guard.ts` (frontend).
+ */
+export type UserRole = 'guest' | 'user' | 'admin';
+
+export type AdminPermission =
+  | 'users_view'
+  | 'users_manage_status'
+  | 'users_manage_role'
+  | 'users_manage_permissions'
+  | 'dashboard_view'
+  | 'audit_log_view';
+
+export interface AdminUserDto {
+  id: string;
+  email: string;
+  displayName: string;
+  role: UserRole;
+  isActive: boolean;
+  createdAt: string;
+}
+
+export interface AdminUserDetailDto extends AdminUserDto {
+  permissions: AdminPermission[];
+}
+
+export interface AdminUsersListDto {
+  total: number;
+  users: AdminUserDto[];
+}
+
+export interface AdminDashboardStatsDto {
+  totalUsers: number;
+  activeUsers: number;
+  inactiveUsers: number;
+  adminCount: number;
+  /** Guests awaiting an admin to activate them (promote to `user`/`admin`). */
+  pendingGuestCount: number;
+  totalSessions: number;
+  totalMessages: number;
+  providerConfiguredCounts: Record<AiProviderKey, number>;
+}
+
+export type AdminAuditAction =
+  | 'user_role_changed'
+  | 'user_status_changed'
+  | 'user_permissions_changed';
+
+export interface AdminAuditLogEntryDto {
+  id: string;
+  action: AdminAuditAction;
+  detail: Record<string, unknown>;
+  createdAt: string;
+  actor: { id: string; email: string; displayName: string } | null;
+  target: { id: string; email: string; displayName: string } | null;
+}
+
+export interface AdminAuditLogListDto {
+  total: number;
+  entries: AdminAuditLogEntryDto[];
+}
+
 // --- WebSocket event contracts ---
 
 export interface ClientToServerEvents {

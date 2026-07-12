@@ -10,6 +10,8 @@
     "test:e2e:browser:report": "playwright show-report"
   },
   "devDependencies": {
-    "@playwright/test": "^1.55.0"
+    "@playwright/test": "^1.55.0",
+    "@types/pg": "^8.20.0",
+    "pg": "^8.22.0"
   }
 }

@@ -8,10 +8,12 @@ import { LocalStrategy } from './strategies/local.strategy';
 import { JwtAccessStrategy } from './strategies/jwt-access.strategy';
 import { JwtRefreshStrategy } from './strategies/jwt-refresh.strategy';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
+import { GuestBlockGuard } from './guards/guest-block.guard';
 import { UsersModule } from '../users/users.module';
+import { AdminModule } from '../admin/admin.module';
 
 @Module({
-  imports: [PassportModule, JwtModule.register({}), UsersModule],
+  imports: [PassportModule, JwtModule.register({}), UsersModule, AdminModule],
   controllers: [AuthController],
   providers: [
     AuthService,
@@ -19,6 +21,9 @@ import { UsersModule } from '../users/users.module';
     JwtAccessStrategy,
     JwtRefreshStrategy,
     { provide: APP_GUARD, useClass: JwtAuthGuard },
+    // Runs after JwtAuthGuard (registration order = execution order for
+    // multiple APP_GUARD providers), so `request.user` is already populated.
+    { provide: APP_GUARD, useClass: GuestBlockGuard },
   ],
   exports: [AuthService],
 })

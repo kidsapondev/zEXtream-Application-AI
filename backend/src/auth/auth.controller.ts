@@ -92,7 +92,12 @@ export class AuthController {
     @Body() _dto: LoginDto,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const user = req.user as { id: string; email: string; displayName: string };
+    const user = req.user as {
+      id: string;
+      email: string;
+      displayName: string;
+      role: string;
+    };
     const { tokens } = await this.authService.login(
       user,
       this.requestMeta(req),

@@ -1,0 +1,76 @@
+<ds-app-shell
+  sidebarTitle="Backoffice"
+  [userInitial]="(authStore.currentUser()?.displayName ?? 'U').charAt(0)"
+  [showAdmin]="authStore.isAdmin()"
+  (newChat)="onNewChat()"
+  (admin)="router.navigateByUrl('/admin')"
+>
+  <div sidebar-list>
+    <p class="hint">History of role, status and permission changes made through the backoffice.</p>
+  </div>
+
+  <div sidebar-footer>
+    <a class="link-button" routerLink="/chat">← Back to chat</a>
+    <button type="button" class="link-button" (click)="onLogout()">Sign out</button>
+  </div>
+
+  <div main>
+    <ds-page-header title="Backoffice">
+      <span actions class="page-subtitle">Audit log</span>
+    </ds-page-header>
+
+    <app-admin-nav />
+
+    @if (!canView()) {
+      <p class="hint hint--error">You don't have permission to view the audit log.</p>
+    } @else if (adminStore.auditError()) {
+      <p class="hint hint--error">Could not load the audit log.</p>
+    } @else if (adminStore.auditLoading()) {
+      <p class="hint">Loading audit log…</p>
+    } @else if (adminStore.auditEntries().length === 0) {
+      <p class="hint">No backoffice actions recorded yet.</p>
+    } @else {
+      <div class="audit-list">
+        @for (entry of adminStore.auditEntries(); track entry.id) {
+          <ds-hairline-card>
+            <div class="audit-entry">
+              <div class="audit-entry__head">
+                <ds-badge-pill status="neutral">{{ actionLabels[entry.action] }}</ds-badge-pill>
+                <span class="audit-entry__date">{{ entry.createdAt | date: 'medium' }}</span>
+              </div>
+              <p class="audit-entry__line">
+                <strong>{{ entry.actor?.email ?? 'Unknown admin' }}</strong>
+                →
+                <strong>{{ entry.target?.email ?? 'Unknown user' }}</strong>
+              </p>
+              <p class="audit-entry__detail">{{ detailSummary(entry.detail) }}</p>
+            </div>
+          </ds-hairline-card>
+        }
+      </div>
+
+      <div class="pagination">
+        <button
+          type="button"
+          class="btn"
+          [disabled]="adminStore.auditPageIndex() === 0"
+          (click)="goToPage(-1)"
+        >
+          ← Previous
+        </button>
+        <span class="hint"
+          >Page {{ adminStore.auditPageIndex() + 1 }} of {{ totalPages() }} ·
+          {{ adminStore.auditTotal() }} entries</span
+        >
+        <button
+          type="button"
+          class="btn"
+          [disabled]="adminStore.auditPageIndex() + 1 >= totalPages()"
+          (click)="goToPage(1)"
+        >
+          Next →
+        </button>
+      </div>
+    }
+  </div>
+</ds-app-shell>

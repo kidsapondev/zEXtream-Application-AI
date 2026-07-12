@@ -38,6 +38,19 @@ import { Component, input, output } from '@angular/core';
 
       <div class="icon-rail__spacer"></div>
 
+      @if (showAdmin()) {
+        <button type="button" class="icon-rail__action" (click)="admin.emit()" aria-label="Backoffice">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+            <path
+              d="M12 2 3 6v6c0 5 3.8 8.7 9 10 5.2-1.3 9-5 9-10V6l-9-4Z"
+              stroke="currentColor"
+              stroke-width="1.5"
+              stroke-linejoin="round"
+            />
+          </svg>
+        </button>
+      }
+
       <button type="button" class="icon-rail__action" (click)="settings.emit()" aria-label="Settings">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
           <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.5" />
@@ -55,7 +68,9 @@ import { Component, input, output } from '@angular/core';
 export class IconRailComponent {
   readonly userInitial = input('U');
   readonly menuOpen = input(false);
+  readonly showAdmin = input(false);
   readonly newChat = output<void>();
   readonly settings = output<void>();
+  readonly admin = output<void>();
   readonly menuToggle = output<void>();
 }

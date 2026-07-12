@@ -33,7 +33,11 @@ export class RegisterComponent {
     try {
       const { email, password, displayName } = this.form.getRawValue();
       await this.authStore.register(email, password, displayName);
-      await this.router.navigateByUrl('/chat');
+      // New accounts start as `guest` and need an admin to activate them — see
+      // AccountPendingComponent.
+      await this.router.navigateByUrl(
+        this.authStore.isGuest() ? '/account-pending' : '/chat',
+      );
     } catch {
       this.errorMessage.set('Could not create an account — the email may already be in use.');
     } finally {

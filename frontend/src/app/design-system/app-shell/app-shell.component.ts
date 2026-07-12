@@ -13,8 +13,10 @@ import { SecondarySidebarComponent } from '../secondary-sidebar/secondary-sideba
       <ds-icon-rail
         [userInitial]="userInitial()"
         [menuOpen]="sidebarOpen()"
+        [showAdmin]="showAdmin()"
         (newChat)="newChat.emit()"
         (settings)="settings.emit()"
+        (admin)="admin.emit()"
         (menuToggle)="sidebarOpen.set(!sidebarOpen())"
       />
 
@@ -40,8 +42,10 @@ import { SecondarySidebarComponent } from '../secondary-sidebar/secondary-sideba
 export class AppShellComponent {
   readonly sidebarTitle = input.required<string>();
   readonly userInitial = input('U');
+  readonly showAdmin = input(false);
   readonly newChat = output<void>();
   readonly settings = output<void>();
+  readonly admin = output<void>();
 
   protected readonly sidebarOpen = signal(false);
 

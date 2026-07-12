@@ -1,0 +1,25 @@
+<div class="auth-page">
+  <ds-hairline-card class="auth-card" [raised]="true">
+    <div class="pending-icon" aria-hidden="true">
+      <svg width="40" height="40" viewBox="0 0 24 24" fill="none">
+        <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.5" />
+        <path d="M12 7v5l3.5 2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+      </svg>
+    </div>
+
+    <ds-badge-pill status="pending" class="pending-badge">รอการเปิดใช้งาน</ds-badge-pill>
+
+    <h1 class="auth-card__title">บัญชีของคุณรอการเปิดใช้งาน</h1>
+    <div class="auth-card__rule"></div>
+
+    <p class="pending-message">
+      กรุณาติดต่อ Admin เพื่อเปิดการใช้งาน
+    </p>
+    <p class="pending-detail">
+      บัญชี <strong>{{ authStore.currentUser()?.email }}</strong> สมัครสำเร็จแล้ว
+      แต่ยังไม่สามารถใช้งานแชทหรือฟีเจอร์อื่น ๆ ได้ จนกว่าผู้ดูแลระบบจะอนุมัติสิทธิ์การใช้งานให้
+    </p>
+
+    <button type="button" class="auth-form__submit" (click)="onLogout()">Sign out</button>
+  </ds-hairline-card>
+</div>

@@ -6,6 +6,7 @@ import { ChatModule } from '../chat/chat.module';
 import { AiModule } from '../ai/ai.module';
 import { ArtifactsModule } from '../artifacts/artifacts.module';
 import { ProviderSettingsModule } from '../provider-settings/provider-settings.module';
+import { UsersModule } from '../users/users.module';
 
 // ActiveStreamRegistry lives in ChatModule (not here) and is provided to
 // ChatGateway transitively via ChatModule's exports. It cannot be provided
@@ -20,6 +21,7 @@ import { ProviderSettingsModule } from '../provider-settings/provider-settings.m
     AiModule,
     ArtifactsModule,
     ProviderSettingsModule,
+    UsersModule,
   ],
   providers: [ChatGateway, WsRateLimiterService],
 })

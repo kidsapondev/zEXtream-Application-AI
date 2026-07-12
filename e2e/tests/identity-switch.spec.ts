@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { registerNewUser, loginUser, createNewChat, sendComposerMessage, uniqueUser } from './helpers';
+import { registerNewUser, loginUser, createNewChat, sendComposerMessage } from './helpers';
 
 /**
  * plan.md Test strategy → Browser E2E: "Logout → login อีก user → socket
@@ -22,13 +22,7 @@ test('logout, then login as a different user, shows only the new user\'s own dat
   await page.getByRole('button', { name: 'Sign out' }).click();
   await expect(page).toHaveURL(/\/login/, { timeout: 10_000 });
 
-  const userB = uniqueUser('identity-b');
-  await page.goto('/register');
-  await page.getByLabel('Name').fill(userB.displayName);
-  await page.getByLabel('Email').fill(userB.email);
-  await page.getByLabel('Password').fill(userB.password);
-  await page.getByRole('button', { name: 'Create account' }).click();
-  await expect(page).toHaveURL(/\/chat/, { timeout: 15_000 });
+  await registerNewUser(page, 'identity-b');
 
   // A brand-new user has no sessions at all — user A's session/title/message
   // must not be visible anywhere in B's UI.

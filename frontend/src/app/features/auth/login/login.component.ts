@@ -33,6 +33,10 @@ export class LoginComponent {
     try {
       const { email, password } = this.form.getRawValue();
       await this.authStore.login(email, password);
+      if (this.authStore.isGuest()) {
+        await this.router.navigateByUrl('/account-pending');
+        return;
+      }
       const returnUrl = this.route.snapshot.queryParamMap.get('returnUrl') ?? '/chat';
       await this.router.navigateByUrl(returnUrl);
     } catch {

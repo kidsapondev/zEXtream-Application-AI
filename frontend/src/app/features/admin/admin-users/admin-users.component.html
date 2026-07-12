@@ -1,0 +1,177 @@
+<ds-app-shell
+  sidebarTitle="Backoffice"
+  [userInitial]="(authStore.currentUser()?.displayName ?? 'U').charAt(0)"
+  [showAdmin]="authStore.isAdmin()"
+  (newChat)="onNewChat()"
+  (admin)="router.navigateByUrl('/admin')"
+>
+  <div sidebar-list>
+    <p class="hint">Search, activate/deactivate, and manage roles &amp; permissions.</p>
+  </div>
+
+  <div sidebar-footer>
+    <a class="link-button" routerLink="/chat">← Back to chat</a>
+    <button type="button" class="link-button" (click)="onLogout()">Sign out</button>
+  </div>
+
+  <div main>
+    <ds-page-header title="Backoffice">
+      <span actions class="page-subtitle">User management</span>
+    </ds-page-header>
+
+    <app-admin-nav />
+
+    @if (!canView()) {
+      <p class="hint hint--error">You don't have permission to view users.</p>
+    } @else {
+      <form class="search-row" (submit)="$event.preventDefault(); applySearch()">
+        <input
+          type="search"
+          placeholder="Search by email or name…"
+          [value]="searchInput()"
+          (input)="onSearchInput($any($event.target).value)"
+        />
+        <button type="submit" class="btn">Search</button>
+      </form>
+
+      @if (adminStore.usersError()) {
+        <p class="hint hint--error">Could not load users.</p>
+      } @else if (adminStore.usersLoading()) {
+        <p class="hint">Loading users…</p>
+      } @else if (adminStore.users().length === 0) {
+        <p class="hint">No users match this search.</p>
+      } @else {
+        <div class="user-table" role="table">
+          <div class="user-row user-row--head" role="row">
+            <span role="columnheader">User</span>
+            <span role="columnheader">Role</span>
+            <span role="columnheader">Status</span>
+            <span role="columnheader">Joined</span>
+            <span role="columnheader">Actions</span>
+          </div>
+
+          @for (user of adminStore.users(); track user.id) {
+            <div class="user-row" role="row">
+              <span class="user-cell">
+                <strong>{{ user.displayName }}</strong>
+                <span class="user-cell__email">{{ user.email }}</span>
+              </span>
+              <span>
+                <ds-badge-pill [status]="roleBadgeStatus(user.role)">
+                  {{ user.role }}
+                </ds-badge-pill>
+              </span>
+              <span>
+                <ds-badge-pill [status]="user.isActive ? 'positive' : 'negative'">
+                  {{ user.isActive ? 'active' : 'inactive' }}
+                </ds-badge-pill>
+              </span>
+              <span class="user-cell__date">{{ user.createdAt | date: 'mediumDate' }}</span>
+              <span class="user-actions">
+                @if (isSelf(user.id)) {
+                  <span class="hint">This is you</span>
+                } @else {
+                  @if (canManageStatus()) {
+                    <button
+                      type="button"
+                      class="btn"
+                      [disabled]="savingUserId() === user.id"
+                      (click)="requestDeactivate(user)"
+                    >
+                      {{ user.isActive ? 'Suspend' : 'Unsuspend' }}
+                    </button>
+                  }
+                  @if (canManageRole()) {
+                    <button
+                      type="button"
+                      class="btn"
+                      [class.btn--primary]="user.role === 'guest'"
+                      [disabled]="savingUserId() === user.id"
+                      (click)="requestRoleChange(user)"
+                    >
+                      {{ roleActionLabel(user) }}
+                    </button>
+                  }
+                  @if (canManagePermissions() && user.role === 'admin') {
+                    <button
+                      type="button"
+                      class="btn"
+                      [disabled]="savingUserId() === user.id"
+                      (click)="togglePermissionEditor(user)"
+                    >
+                      {{ expandedUserId() === user.id ? 'Close' : 'Permissions' }}
+                    </button>
+                  }
+                }
+              </span>
+            </div>
+
+            @if (expandedUserId() === user.id) {
+              <div class="permission-editor" role="row">
+                <ds-hairline-card>
+                  <div class="permission-editor__grid">
+                    @for (option of permissionOptions; track option.value) {
+                      <label class="permission-editor__item">
+                        <input
+                          type="checkbox"
+                          [checked]="isPermissionChecked(option.value)"
+                          (change)="togglePermission(option.value, $any($event.target).checked)"
+                        />
+                        {{ option.label }}
+                      </label>
+                    }
+                  </div>
+                  <button
+                    type="button"
+                    class="btn btn--primary"
+                    [disabled]="savingUserId() === user.id"
+                    (click)="savePermissions(user)"
+                  >
+                    Save permissions
+                  </button>
+                </ds-hairline-card>
+              </div>
+            }
+          }
+        </div>
+
+        <div class="pagination">
+          <button
+            type="button"
+            class="btn"
+            [disabled]="adminStore.userPageIndex() === 0"
+            (click)="goToPage(-1)"
+          >
+            ← Previous
+          </button>
+          <span class="hint"
+            >Page {{ adminStore.userPageIndex() + 1 }} of {{ totalPages() }} ·
+            {{ adminStore.usersTotal() }} users</span
+          >
+          <button
+            type="button"
+            class="btn"
+            [disabled]="adminStore.userPageIndex() + 1 >= totalPages()"
+            (click)="goToPage(1)"
+          >
+            Next →
+          </button>
+        </div>
+      }
+    }
+  </div>
+</ds-app-shell>
+
+<ds-confirm-dialog
+  [open]="pendingConfirm() !== null"
+  [title]="pendingConfirm()?.type === 'demote' ? 'Demote this admin?' : 'Deactivate this user?'"
+  [message]="
+    pendingConfirm()?.type === 'demote'
+      ? 'This removes their admin role and revokes all backoffice permissions.'
+      : 'They will not be able to sign in until reactivated.'
+  "
+  confirmLabel="Confirm"
+  [danger]="true"
+  (confirmed)="confirmPending()"
+  (cancelled)="pendingConfirm.set(null)"
+/>

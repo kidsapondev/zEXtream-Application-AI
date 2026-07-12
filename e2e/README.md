@@ -60,6 +60,12 @@ suite (no real Ollama is available in this environment). Covered for real:
 - Stop generation button / composer recovery, exercised against the same
   deterministic "provider unreachable" error path used elsewhere in this repo's
   test suites (`tests/stop-generation.spec.ts`)
+- Guest role: a freshly registered account sees the pending-activation screen,
+  can't reach `/chat`, and gains access once an admin activates it from the
+  backoffice Users page (`tests/guest-activation.spec.ts`) — every other spec's
+  `registerNewUser()` fixture bypasses this flow via a direct DB promotion
+  (see that helper's doc comment in `tests/helpers.ts`) since they just need a
+  working account, not a test of activation itself
 
 Explicitly **not** run (would require mocking the AI response to fake a pass,
 which the task this suite was built for called out as dishonest — see

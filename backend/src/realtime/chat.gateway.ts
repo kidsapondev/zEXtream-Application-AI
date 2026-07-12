@@ -28,6 +28,7 @@ import {
   normalizeArtifactFilename,
 } from '../artifacts/artifacts.service';
 import { ProviderSettingsService } from '../provider-settings/provider-settings.service';
+import { UsersService } from '../users/users.service';
 import { SessionJoinDto } from './dto/session-join.dto';
 import { SessionLeaveDto } from './dto/session-leave.dto';
 import { ChatStopDto } from './dto/chat-stop.dto';
@@ -117,6 +118,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly artifactsService: ArtifactsService,
     private readonly providerSettingsService: ProviderSettingsService,
     private readonly wsRateLimiter: WsRateLimiterService,
+    private readonly usersService: UsersService,
   ) {}
 
   handleConnection(client: Socket) {
@@ -133,6 +135,13 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     } catch {
       client.disconnect();
     }
+    // Deliberately *not* checking `role === 'guest'` here even though it's known at
+    // connect time: `handleConnection` must stay synchronous. A client's 'connect'
+    // event fires as soon as the Engine.IO handshake completes, independent of
+    // whether this handler (if it awaited a DB call) had finished — so a guest could
+    // race a `chat:send` in before an async disconnect-on-guest lands here. Guest
+    // blocking instead happens per-message in `requireActiveUser()`, called by every
+    // handler that already awaits other DB work, where no such race exists.
   }
 
   /**
@@ -160,7 +169,8 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @MessageBody() body: SessionJoinDto,
   ) {
     this.assertNotRateLimited(client, 'session:join');
-    await this.sessionsService.getOwned(this.userId(client), body.sessionId);
+    const userId = await this.requireActiveUser(client);
+    await this.sessionsService.getOwned(userId, body.sessionId);
     await client.join(this.roomName(body.sessionId));
   }
 
@@ -179,9 +189,10 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @MessageBody() body: ChatStopDto,
   ) {
     this.assertNotRateLimited(client, 'chat:stop');
+    const userId = await this.requireActiveUser(client);
     const isOwner = await this.messagesService.isOwnedByUser(
       body.messageId,
-      this.userId(client),
+      userId,
     );
     if (!isOwner) return;
     this.streamRegistry.stop(body.messageId);
@@ -193,12 +204,10 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @MessageBody() body: ArtifactEditDto,
   ) {
     this.assertNotRateLimited(client, 'artifact:edit');
+    const userId = await this.requireActiveUser(client);
     const existing = await this.artifactsService.getById(body.artifactId);
     if (!existing) return;
-    await this.sessionsService.getOwned(
-      this.userId(client),
-      existing.sessionId,
-    );
+    await this.sessionsService.getOwned(userId, existing.sessionId);
 
     const updated = await this.artifactsService.createRevision({
       sessionId: existing.sessionId,
@@ -219,7 +228,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @MessageBody() body: ChatSendDto,
   ) {
     this.assertNotRateLimited(client, 'chat:send');
-    const userId = this.userId(client);
+    const userId = await this.requireActiveUser(client);
     const session = await this.sessionsService.getOwned(userId, body.sessionId);
     const room = this.roomName(body.sessionId);
     const providerKey = body.provider ?? session.defaultProvider;
@@ -471,6 +480,23 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const userId = this.socketData(client)['userId'];
     if (typeof userId !== 'string' || !userId) {
       throw new WsException('Socket is not authenticated');
+    }
+    return userId;
+  }
+
+  /**
+   * Mirrors GuestBlockGuard on the REST side, but per-message rather than at connect
+   * time — see the comment on `handleConnection` for why. Every handler that lets a
+   * guest read/write anything (join a session, send/stop a message, edit an artifact)
+   * calls this right after resolving `userId()`, before doing any other DB work.
+   */
+  private async requireActiveUser(client: Socket): Promise<string> {
+    const userId = this.userId(client);
+    const user = await this.usersService.findById(userId);
+    if (!user || user.role === 'guest') {
+      throw new WsException(
+        'Your account is pending activation. Please contact an admin.',
+      );
     }
     return userId;
   }

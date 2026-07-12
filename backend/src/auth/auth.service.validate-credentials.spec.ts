@@ -99,7 +99,7 @@ describe('AuthService.validateCredentials', () => {
     expect(argon2.verify).toHaveBeenCalledWith('real-hash', 'wrong-password');
   });
 
-  it('returns the user when credentials are valid', async () => {
+  it('returns the user (including role) when credentials are valid', async () => {
     const { service } = createService(() =>
       Promise.resolve({
         id: 'user-1',
@@ -107,6 +107,7 @@ describe('AuthService.validateCredentials', () => {
         passwordHash: 'real-hash',
         isActive: true,
         displayName: 'User',
+        role: 'user',
       }),
     );
     (argon2.verify as jest.Mock).mockResolvedValueOnce(true);
@@ -120,6 +121,7 @@ describe('AuthService.validateCredentials', () => {
       id: 'user-1',
       email: 'user@example.com',
       displayName: 'User',
+      role: 'user',
     });
   });
 });

@@ -7,6 +7,7 @@ datasource db {
 }
 
 enum UserRole {
+  guest
   user
   admin
 
@@ -18,7 +19,9 @@ model User {
   email        String   @unique
   passwordHash String   @map("password_hash")
   displayName  String   @map("display_name")
-  role         UserRole @default(user)
+  // New registrations start as `guest` and cannot use the app until an admin promotes
+  // them to `user` (or `admin`) via the backoffice — see GuestBlockGuard.
+  role         UserRole @default(guest)
   isActive     Boolean  @default(true) @map("is_active")
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
@@ -26,8 +29,58 @@ model User {
   refreshTokens RefreshToken[]
   chatSessions  ChatSession[]
   providerCredentials ProviderCredential[]
+  adminPermissionGrants AdminPermissionGrant[]
+  adminAuditLogEntriesAsActor  AdminAuditLogEntry[] @relation("AdminAuditActor")
+  adminAuditLogEntriesAsTarget AdminAuditLogEntry[] @relation("AdminAuditTarget")
 
   @@map("users")
+}
+
+enum AdminPermission {
+  users_view
+  users_manage_status
+  users_manage_role
+  users_manage_permissions
+  dashboard_view
+  audit_log_view
+
+  @@map("admin_permission")
+}
+
+model AdminPermissionGrant {
+  id         String          @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  userId     String          @map("user_id") @db.Uuid
+  permission AdminPermission
+  grantedAt  DateTime        @default(now()) @map("granted_at")
+  grantedBy  String?         @map("granted_by") @db.Uuid
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, permission])
+  @@map("admin_permission_grants")
+}
+
+enum AdminAuditAction {
+  user_role_changed
+  user_status_changed
+  user_permissions_changed
+
+  @@map("admin_audit_action")
+}
+
+model AdminAuditLogEntry {
+  id           String           @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  actorUserId  String?          @map("actor_user_id") @db.Uuid
+  targetUserId String?          @map("target_user_id") @db.Uuid
+  action       AdminAuditAction
+  detail       Json
+  createdAt    DateTime         @default(now()) @map("created_at")
+
+  actor  User? @relation("AdminAuditActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+  target User? @relation("AdminAuditTarget", fields: [targetUserId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt(sort: Desc)])
+  @@map("admin_audit_log_entries")
 }
 
 enum AiProvider {

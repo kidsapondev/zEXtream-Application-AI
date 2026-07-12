@@ -139,6 +139,33 @@ describe('WebSocket / Socket.IO integration (e2e)', () => {
       await waitForDisconnectOrError(socket);
       expect(socket.connected).toBe(false);
     });
+
+    it('connects a guest (valid token) but rejects session:join with an error, same as GuestBlockGuard on REST', async () => {
+      const guest = await registerUser(app, 'ws-conn-guest', {
+        role: 'guest',
+      });
+      createdUserIds.push(guest.user.id);
+      const created = await request(app.getHttpServer())
+        .post('/api/chat/sessions')
+        .set('Authorization', `Bearer ${guest.accessToken}`)
+        .send({ defaultProvider: 'ollama', defaultModel: 'test-model' });
+      // A guest can't create a session either (REST is guarded too), so join
+      // against a session id that just doesn't belong to them — the point of
+      // this test is that the *guest check* rejects it, not ownership.
+      const sessionId =
+        created.status === 201
+          ? (created.body as { id: string }).id
+          : '11111111-1111-4111-8111-111111111111';
+
+      const socket = connect(guest.accessToken);
+      await waitForEvent(socket, 'connect');
+      expect(socket.connected).toBe(true); // connects fine — see handleConnection's doc comment
+
+      const errorPromise = waitForEvent(socket, 'exception');
+      socket.emit('session:join', { sessionId });
+      const error = (await errorPromise) as { message?: string };
+      expect(error.message).toMatch(/pending activation/i);
+    });
   });
 
   describe('session:join', () => {

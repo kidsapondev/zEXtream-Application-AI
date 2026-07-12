@@ -1,8 +1,10 @@
 <ds-app-shell
   sidebarTitle="Chats"
   [userInitial]="(authStore.currentUser()?.displayName ?? 'U').charAt(0)"
+  [showAdmin]="authStore.isAdmin()"
   (newChat)="onNewChat()"
   (settings)="onSettings()"
+  (admin)="onAdmin()"
 >
   <div sidebar-list>
     @if (sessionListStore.isLoading()) {

@@ -20,6 +20,7 @@ function user(overrides: Partial<CurrentUser> = {}): CurrentUser {
     email: 'test@example.com',
     displayName: 'Test User',
     role: 'user',
+    permissions: [],
     ...overrides,
   };
 }
