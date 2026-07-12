@@ -306,6 +306,72 @@ nothing about AI-streaming load (which is bounded by the upstream provider,
 not this service's own CPU) or write-heavy paths. Revisit with a
 production-realistic traffic mix before trusting these limits at real scale.
 
+### Concurrent AI-streaming load test
+
+Follow-up to the gap called out above: ran a real concurrent `chat:send`
+load test (real Socket.IO connections, real Ollama, real `qwen2.5-coder:14b`)
+against an **isolated** `target: prod` backend container (same 1.0 CPU / 1GB
+memory limits as `docker-compose.prod.yml`, its own throwaway Postgres
+database) — deliberately not the live production container, so this
+couldn't affect real traffic. Both point at the same shared local Ollama
+instance production uses, since that's the actual resource being tested.
+
+**First attempt was contaminated and got discarded.** The first run (8
+concurrent streams) happened while the host machine was also running a game
+that competes for the same GPU/CPU Ollama needs — every stream timed out
+without receiving a single token inside the 90s connect-timeout, which read
+at the time like "Ollama can't handle 8 concurrent 14B-model generations on
+this hardware." Re-ran after the game was closed and the result was
+completely different (below) — the first run's numbers said more about GPU
+contention with an unrelated game than about this app's real capacity, so
+they're superseded rather than kept as a data point.
+
+**Corrected results** (game closed, Ollama warmed up with one throwaway
+request first so cold-model-load time — confirmed separately at ~9s on this
+hardware — doesn't contaminate the concurrency-specific numbers):
+
+- **8 concurrent streams**: all 8 succeeded. First-token latency 532–1192ms
+  (avg 877ms), total stream duration 615–1253ms (avg 942ms), whole batch
+  wall-clock 1.3s.
+- **20 concurrent streams**: all 20 succeeded too. First-token latency
+  829–2711ms (avg 1.8s), total duration 915–2774ms (avg 1.9s), whole batch
+  wall-clock 2.9s — latency degrades gracefully with concurrency, no errors,
+  no timeouts.
+- Backend container resource usage across both runs: CPU averaged 6.7%
+  (brief bursts to ~86%), memory 91–160MB — nowhere near the 1.0 CPU / 1GB
+  cap in either run.
+
+Did not push past 20 concurrent in this pass (stopped there deliberately —
+escalating further against the same Ollama instance other real usage of
+this machine depends on isn't something to do without a specific reason to
+find the exact breaking point). 20 concurrent, uncontended, already
+comfortably succeeds with sub-3-second latency, which is a substantially
+healthier picture than the contaminated first run suggested.
+
+**New metrics from this pass** (`backend/src/common/metrics.service.ts`,
+closing the gap this section used to leave open): `ai_active_streams`
+(gauge, by provider), `ai_stream_duration_seconds` and
+`ai_first_token_latency_seconds` (histograms, by provider/status) — hooked
+into `ChatGateway.onChatSend` at the same points it already touches
+`ActiveStreamRegistry`. Verified against the corrected load test: the gauge
+correctly returned to 0 after every run (no leak across 28 total streams),
+and the histograms captured every stream outcome with the right labels —
+see `GET /api/metrics`.
+
+**Takeaway**: this app's own backend scales comfortably well past what a
+single-machine deployment is likely to see concurrently — sub-7% average
+CPU and well under 200MB of memory holding 20 concurrent streaming
+WebSocket connections plus 20 concurrent outbound HTTP streams to Ollama.
+The practical ceiling for AI-streaming throughput on a deployment like this
+one is the upstream Ollama instance's own generation capacity (and
+competing host load, as the discarded first run demonstrated firsthand) —
+not anything this repo's backend code controls. If concurrent-user AI
+throughput needs to scale further than Ollama-on-this-hardware can provide,
+the lever to pull is Ollama's own parallelism/hardware, keeping the host
+free of competing GPU load, or a hosted provider (Claude/OpenAI) that
+doesn't share this machine's compute at all — not the backend's CPU/memory
+limits, which have large headroom at every concurrency level tested.
+
 ## Health checks
 
 `docker-compose.yml` defines a `healthcheck` for `backend` (works identically
