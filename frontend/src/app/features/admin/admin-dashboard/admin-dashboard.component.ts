@@ -1,4 +1,5 @@
 import { Component, computed, inject } from '@angular/core';
+import { DecimalPipe } from '@angular/common';
 import { Router, RouterLink } from '@angular/router';
 import { AppShellComponent } from '../../../design-system/app-shell/app-shell.component';
 import { PageHeaderComponent } from '../../../design-system/page-header/page-header.component';
@@ -16,6 +17,7 @@ const DEFAULT_OLLAMA_MODEL = 'qwen2.5-coder:14b';
   selector: 'app-admin-dashboard',
   imports: [
     RouterLink,
+    DecimalPipe,
     AppShellComponent,
     PageHeaderComponent,
     StatCardComponent,
@@ -37,9 +39,14 @@ export class AdminDashboardComponent {
   );
 
   protected readonly providerEntries = computed(() => {
-    const counts = this.adminStore.dashboardStats()?.providerConfiguredCounts;
+    const stats = this.adminStore.dashboardStats();
+    const counts = stats?.providerConfiguredCounts;
     if (!counts) return [];
-    return Object.entries(counts) as [string, number][];
+    return Object.entries(counts).map(([provider, userCount]) => ({
+      provider,
+      userCount,
+      tokens: stats?.tokensByProvider?.[provider as keyof typeof counts] ?? 0,
+    }));
   });
 
   async onNewChat(): Promise<void> {

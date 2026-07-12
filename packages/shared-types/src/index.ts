@@ -26,6 +26,12 @@ export interface ChatMessageDto {
   model: string | null;
   streamingStatus: StreamStatus;
   errorMessage: string | null;
+  /**
+   * Total (prompt + completion) tokens the provider reported for this exchange, when it
+   * reported usage at all — `null` means unknown (older message predating this feature,
+   * or the provider/stream never reached a `done` event with usage attached), not zero.
+   */
+  tokenCount: number | null;
   createdAt: string;
 }
 
@@ -101,6 +107,9 @@ export interface AdminDashboardStatsDto {
   totalSessions: number;
   totalMessages: number;
   providerConfiguredCounts: Record<AiProviderKey, number>;
+  /** Sum of `Message.tokenCount` across every message that reported usage. */
+  totalTokensUsed: number;
+  tokensByProvider: Record<AiProviderKey, number>;
 }
 
 export type AdminAuditAction =

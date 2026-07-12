@@ -102,6 +102,49 @@ describe('ClaudeProvider', () => {
     expect(parsedBody.messages).toEqual([{ role: 'user', content: 'hi' }]);
   });
 
+  it('combines input tokens from message_start with output tokens from message_delta into one usage', async () => {
+    const readImpl = jest
+      .fn()
+      .mockResolvedValueOnce({
+        done: false,
+        value: encode(
+          'event: message_start\ndata: {"type":"message_start","message":{"usage":{"input_tokens":12}}}\n\n' +
+            'event: content_block_delta\ndata: {"type":"content_block_delta","delta":{"text":"ok"}}\n\n',
+        ),
+      })
+      .mockResolvedValueOnce({
+        done: false,
+        value: encode(
+          'event: message_delta\ndata: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":34}}\n\n' +
+            'event: message_stop\ndata: {"type":"message_stop"}\n\n',
+        ),
+      });
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      body: { getReader: () => createReader(readImpl) },
+    }) as never;
+
+    const provider = new ClaudeProvider(new CircuitBreakerService());
+    const events = await collect(
+      provider.streamChat({
+        messages: [{ role: 'user', content: 'hi' }],
+        model: 'claude-sonnet-5',
+        apiKey: 'sk-test',
+        abortSignal: new AbortController().signal,
+      }),
+    );
+
+    expect(events).toEqual([
+      { type: 'token', delta: 'ok' },
+      {
+        type: 'done',
+        finishReason: 'end_turn',
+        usage: { inputTokens: 12, outputTokens: 34 },
+      },
+    ]);
+  });
+
   it('skips a malformed/truncated SSE data frame and continues streaming', async () => {
     const readImpl = jest.fn().mockResolvedValueOnce({
       done: false,

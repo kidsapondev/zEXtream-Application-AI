@@ -12,6 +12,9 @@ interface OllamaChatChunk {
   message?: { role: string; content: string };
   done: boolean;
   done_reason?: string;
+  /** Only present on the final (`done: true`) chunk. */
+  prompt_eval_count?: number;
+  eval_count?: number;
 }
 
 /**
@@ -189,7 +192,17 @@ export class OllamaProvider implements AiProvider {
           }
           if (chunk.done) {
             clearTimeout(inactivityTimer);
-            yield { type: 'done', finishReason: chunk.done_reason ?? 'stop' };
+            yield {
+              type: 'done',
+              finishReason: chunk.done_reason ?? 'stop',
+              usage:
+                chunk.prompt_eval_count != null && chunk.eval_count != null
+                  ? {
+                      inputTokens: chunk.prompt_eval_count,
+                      outputTokens: chunk.eval_count,
+                    }
+                  : undefined,
+            };
             return;
           }
         }

@@ -29,6 +29,7 @@ import {
 } from '../artifacts/artifacts.service';
 import { ProviderSettingsService } from '../provider-settings/provider-settings.service';
 import { UsersService } from '../users/users.service';
+import { MetricsService } from '../common/metrics.service';
 import { SessionJoinDto } from './dto/session-join.dto';
 import { SessionLeaveDto } from './dto/session-leave.dto';
 import { ChatStopDto } from './dto/chat-stop.dto';
@@ -86,6 +87,12 @@ function artifactContextMessage(
   return `These are the latest files in the current workspace. Preserve them when making edits and use their exact relative paths:\n${files}`;
 }
 
+/** `process.hrtime.bigint()` is monotonic (immune to system clock adjustments), unlike
+ * `Date.now()` — the right clock source for measuring a duration, not a point in time. */
+function secondsSince(startedAt: bigint): number {
+  return Number(process.hrtime.bigint() - startedAt) / 1e9;
+}
+
 @WebSocketGateway({
   path: '/ws/socket.io',
   cors: { origin: process.env.CORS_ORIGIN, credentials: true },
@@ -119,6 +126,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly providerSettingsService: ProviderSettingsService,
     private readonly wsRateLimiter: WsRateLimiterService,
     private readonly usersService: UsersService,
+    private readonly metricsService: MetricsService,
   ) {}
 
   handleConnection(client: Socket) {
@@ -386,12 +394,17 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       }
     };
 
+    const streamStartedAt = process.hrtime.bigint();
+    let firstTokenObserved = false;
+    let tokenCount: number | undefined;
+
     try {
       const provider = this.aiProviderFactory.getProvider(providerKey);
       controller = this.streamRegistry.register(
         assistantMessage.id,
         body.sessionId,
       );
+      this.metricsService.streamStarted(providerKey);
 
       for await (const event of provider.streamChat({
         messages: aiMessages,
@@ -400,10 +413,20 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         abortSignal: controller.signal,
       })) {
         if (event.type === 'token') {
+          if (!firstTokenObserved) {
+            firstTokenObserved = true;
+            this.metricsService.observeFirstTokenLatency(
+              providerKey,
+              secondsSince(streamStartedAt),
+            );
+          }
           await handleSegments(parser.push(event.delta));
         } else if (event.type === 'done') {
           finalStatus =
             event.finishReason === 'stopped' ? 'stopped' : 'complete';
+          if (event.usage) {
+            tokenCount = event.usage.inputTokens + event.usage.outputTokens;
+          }
         } else if (event.type === 'error') {
           finalStatus = 'error';
           finalErrorMessage = event.message;
@@ -438,6 +461,11 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       if (controller) {
         this.streamRegistry.release(assistantMessage.id);
+        this.metricsService.streamEnded(
+          providerKey,
+          finalStatus,
+          secondsSince(streamStartedAt),
+        );
       }
 
       const updated = await this.messagesService.finalizeAssistantMessage(
@@ -445,6 +473,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         proseContent,
         finalStatus,
         finalErrorMessage,
+        tokenCount,
       );
       this.server.to(room).emit('chat:message:updated', { message: updated });
     }

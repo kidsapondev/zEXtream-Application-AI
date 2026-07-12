@@ -93,6 +93,57 @@ describe('OpenAiProvider', () => {
     expect(init.headers['Authorization']).toBe('Bearer sk-test');
   });
 
+  it('requests stream_options.include_usage and reports usage from the trailing usage-only chunk', async () => {
+    const readImpl = jest
+      .fn()
+      .mockResolvedValueOnce({
+        done: false,
+        value: encode(
+          'data: {"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}\n\n',
+        ),
+      })
+      .mockResolvedValueOnce({
+        done: false,
+        value: encode(
+          'data: {"choices":[],"usage":{"prompt_tokens":12,"completion_tokens":34}}\n\n' +
+            'data: [DONE]\n\n',
+        ),
+      });
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      body: { getReader: () => createReader(readImpl) },
+    }) as never;
+
+    const provider = new OpenAiProvider(new CircuitBreakerService());
+    const events = await collect(
+      provider.streamChat({
+        messages: [{ role: 'user', content: 'hi' }],
+        model: 'gpt-5.1',
+        apiKey: 'sk-test',
+        abortSignal: new AbortController().signal,
+      }),
+    );
+
+    expect(events).toEqual([
+      { type: 'token', delta: 'ok' },
+      {
+        type: 'done',
+        finishReason: 'stop',
+        usage: { inputTokens: 12, outputTokens: 34 },
+      },
+    ]);
+
+    const [, init] = (global.fetch as jest.Mock).mock.calls[0] as [
+      string,
+      { body: string },
+    ];
+    const parsedBody = JSON.parse(init.body) as {
+      stream_options?: { include_usage?: boolean };
+    };
+    expect(parsedBody.stream_options).toEqual({ include_usage: true });
+  });
+
   it('skips a malformed/truncated SSE data line and continues streaming', async () => {
     const readImpl = jest.fn().mockResolvedValueOnce({
       done: false,

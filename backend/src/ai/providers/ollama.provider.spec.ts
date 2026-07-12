@@ -83,6 +83,39 @@ describe('OllamaProvider', () => {
     ]);
   });
 
+  it('reports token usage from the final done chunk', async () => {
+    const readImpl = jest.fn().mockResolvedValueOnce({
+      done: false,
+      value: encode(
+        '{"message":{"content":"ok"},"done":false}\n' +
+          '{"done":true,"done_reason":"stop","prompt_eval_count":12,"eval_count":34}\n',
+      ),
+    });
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      body: { getReader: () => createReader(readImpl) },
+    }) as never;
+
+    const provider = createProvider();
+    const events = await collect(
+      provider.streamChat({
+        messages: [],
+        model: 'llama3',
+        abortSignal: new AbortController().signal,
+      }),
+    );
+
+    expect(events).toEqual([
+      { type: 'token', delta: 'ok' },
+      {
+        type: 'done',
+        finishReason: 'stop',
+        usage: { inputTokens: 12, outputTokens: 34 },
+      },
+    ]);
+  });
+
   it('skips a malformed/non-JSON line and continues streaming subsequent valid lines', async () => {
     const readImpl = jest
       .fn()

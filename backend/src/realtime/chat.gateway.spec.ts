@@ -57,6 +57,7 @@ describe('ChatGateway chat:stop', () => {
     {} as never,
     new WsRateLimiterService(),
     usersService as never,
+    {} as never,
   );
 
   const client = { data: { userId: 'user-1' } } as unknown as Socket;
@@ -118,6 +119,11 @@ describe('ChatGateway chat:send failure handling', () => {
   const usersService = {
     findById: jest.fn(() => Promise.resolve({ role: 'user' })),
   };
+  const metricsService = {
+    streamStarted: jest.fn(),
+    streamEnded: jest.fn(),
+    observeFirstTokenLatency: jest.fn(),
+  };
   const emit = jest.fn<(event: string, payload: unknown) => void>();
   const wsRateLimiter = new WsRateLimiterService();
 
@@ -132,6 +138,7 @@ describe('ChatGateway chat:send failure handling', () => {
     providerSettingsService as never,
     wsRateLimiter,
     usersService as never,
+    metricsService as never,
   );
 
   gateway.server = { to: jest.fn(() => ({ emit })) } as never;
@@ -236,8 +243,120 @@ describe('ChatGateway chat:send failure handling', () => {
       '',
       'error',
       'upstream unavailable',
+      undefined,
     );
     expect(streamRegistry.release).toHaveBeenCalledWith('assistant-message');
+    expect(metricsService.streamStarted).toHaveBeenCalledWith('ollama');
+    expect(metricsService.observeFirstTokenLatency).toHaveBeenCalledTimes(1);
+    expect(metricsService.observeFirstTokenLatency).toHaveBeenCalledWith(
+      'ollama',
+      expect.any(Number),
+    );
+    expect(metricsService.streamEnded).toHaveBeenCalledWith(
+      'ollama',
+      'error',
+      expect.any(Number),
+    );
+  });
+
+  it('records first-token latency only once across a multi-token stream', async () => {
+    aiProviderFactory.hasProvider.mockReturnValue(true);
+    aiProviderFactory.getProvider.mockReturnValue({
+      *streamChat() {
+        yield { type: 'token' as const, delta: 'hello ' };
+        yield { type: 'token' as const, delta: 'world' };
+        yield { type: 'done' as const, finishReason: 'complete' as const };
+      },
+    });
+    streamRegistry.register.mockReturnValue(new AbortController());
+
+    await gateway.onChatSend(client, {
+      sessionId: 'session-1',
+      content: 'hello',
+    });
+
+    expect(metricsService.observeFirstTokenLatency).toHaveBeenCalledTimes(1);
+    expect(metricsService.streamEnded).toHaveBeenCalledWith(
+      'ollama',
+      'complete',
+      expect.any(Number),
+    );
+  });
+
+  it('persists the combined input+output token count reported by the provider', async () => {
+    aiProviderFactory.hasProvider.mockReturnValue(true);
+    aiProviderFactory.getProvider.mockReturnValue({
+      *streamChat() {
+        yield { type: 'token' as const, delta: 'hello' };
+        yield {
+          type: 'done' as const,
+          finishReason: 'complete' as const,
+          usage: { inputTokens: 12, outputTokens: 34 },
+        };
+      },
+    });
+    streamRegistry.register.mockReturnValue(new AbortController());
+
+    await gateway.onChatSend(client, {
+      sessionId: 'session-1',
+      content: 'hello',
+    });
+
+    expect(messagesService.finalizeAssistantMessage).toHaveBeenCalledWith(
+      'assistant-message',
+      'hello',
+      'complete',
+      undefined,
+      46,
+    );
+  });
+
+  it('leaves tokenCount undefined when the provider does not report usage', async () => {
+    aiProviderFactory.hasProvider.mockReturnValue(true);
+    aiProviderFactory.getProvider.mockReturnValue({
+      *streamChat() {
+        yield { type: 'done' as const, finishReason: 'complete' as const };
+      },
+    });
+    streamRegistry.register.mockReturnValue(new AbortController());
+
+    await gateway.onChatSend(client, {
+      sessionId: 'session-1',
+      content: 'hello',
+    });
+
+    expect(messagesService.finalizeAssistantMessage).toHaveBeenCalledWith(
+      'assistant-message',
+      '',
+      'complete',
+      undefined,
+      undefined,
+    );
+  });
+
+  it('does not record first-token latency when the provider errors before yielding any token', async () => {
+    aiProviderFactory.hasProvider.mockReturnValue(true);
+    aiProviderFactory.getProvider.mockReturnValue({
+      // Not a generator: throws the moment onChatSend calls streamChat(), before a
+      // `for await` even starts — the case where the provider fails before any token
+      // event is possible, as distinct from failing mid-stream (covered above).
+      streamChat: () => {
+        throw new Error('connection refused');
+      },
+    });
+    streamRegistry.register.mockReturnValue(new AbortController());
+
+    await gateway.onChatSend(client, {
+      sessionId: 'session-1',
+      content: 'hello',
+    });
+
+    expect(metricsService.observeFirstTokenLatency).not.toHaveBeenCalled();
+    expect(metricsService.streamEnded).toHaveBeenCalledWith(
+      'ollama',
+      'error',
+      expect.any(Number),
+    );
   });
 
   it('fails an oversized AI artifact without persisting a partial revision', async () => {
@@ -266,6 +385,7 @@ describe('ChatGateway chat:send failure handling', () => {
       '',
       'error',
       `Artifact content must not exceed ${MAX_ARTIFACT_CONTENT_BYTES} bytes`,
+      undefined,
     );
   });
 
@@ -301,6 +421,7 @@ describe('ChatGateway chat:send failure handling', () => {
       'assistant-message',
       '',
       'stopped',
+      undefined,
       undefined,
     );
   });
@@ -481,6 +602,7 @@ describe('ChatGateway chat:send failure handling', () => {
       'hello world',
       'complete',
       undefined,
+      undefined,
     );
     expect(emit).toHaveBeenCalledWith('chat:message:updated', {
       message: {
@@ -594,6 +716,7 @@ describe('ChatGateway auth is enforced by the gateway itself, independent of the
     artifactsService as never,
     {} as never,
     new WsRateLimiterService(),
+    {} as never,
     {} as never,
   );
 

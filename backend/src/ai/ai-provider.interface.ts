@@ -16,9 +16,15 @@ export interface AiChatRequest {
   abortSignal: AbortSignal;
 }
 
+/** Token counts for one exchange, when the upstream provider reports them. */
+export interface AiTokenUsage {
+  inputTokens: number;
+  outputTokens: number;
+}
+
 export type AiStreamEvent =
   | { type: 'token'; delta: string }
-  | { type: 'done'; finishReason: string }
+  | { type: 'done'; finishReason: string; usage?: AiTokenUsage }
   | { type: 'error'; message: string };
 
 export interface AiProvider {

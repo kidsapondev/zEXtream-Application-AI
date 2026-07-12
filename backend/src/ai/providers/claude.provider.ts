@@ -4,6 +4,7 @@ import {
   AiMessage,
   AiProvider,
   AiStreamEvent,
+  AiTokenUsage,
 } from '../ai-provider.interface';
 import { CircuitBreakerService } from '../circuit-breaker.service';
 import { fetchWithRetry } from './fetch-with-retry';
@@ -130,6 +131,17 @@ export class ClaudeProvider implements AiProvider {
     const decoder = new TextDecoder();
     let buffer = '';
     let doneEmitted = false;
+    // `message_start` reports input tokens once, up front; `message_delta` reports
+    // (cumulative) output tokens alongside stop_reason, near the end. Both are needed to
+    // build one combined AiTokenUsage for the `done` event — Claude never sends them together.
+    let inputTokens: number | undefined;
+
+    function usageFrom(
+      outputTokens: number | undefined,
+    ): AiTokenUsage | undefined {
+      if (inputTokens == null || outputTokens == null) return undefined;
+      return { inputTokens, outputTokens };
+    }
 
     try {
       while (true) {
@@ -160,7 +172,12 @@ export class ClaudeProvider implements AiProvider {
           }
 
           const type = payload['type'];
-          if (type === 'content_block_delta') {
+          if (type === 'message_start') {
+            inputTokens = (
+              payload['message'] as
+                { usage?: { input_tokens?: number } } | undefined
+            )?.usage?.input_tokens;
+          } else if (type === 'content_block_delta') {
             const delta = (payload['delta'] as { text?: string } | undefined)
               ?.text;
             if (delta) yield { type: 'token', delta };
@@ -168,9 +185,16 @@ export class ClaudeProvider implements AiProvider {
             const stopReason = (
               payload['delta'] as { stop_reason?: string } | undefined
             )?.stop_reason;
+            const outputTokens = (
+              payload['usage'] as { output_tokens?: number } | undefined
+            )?.output_tokens;
             if (stopReason) {
               doneEmitted = true;
-              yield { type: 'done', finishReason: stopReason };
+              yield {
+                type: 'done',
+                finishReason: stopReason,
+                usage: usageFrom(outputTokens),
+              };
             }
           } else if (type === 'message_stop') {
             if (!doneEmitted) {

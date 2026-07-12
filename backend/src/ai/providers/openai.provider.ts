@@ -15,6 +15,13 @@ interface OpenAiChunk {
     delta?: { content?: string };
     finish_reason?: string | null;
   }>;
+  // Only present when the request sets `stream_options.include_usage: true` (see
+  // below) — arrives on its own trailing chunk with an empty `choices` array, after
+  // the chunk that carries `finish_reason`.
+  usage?: {
+    prompt_tokens?: number;
+    completion_tokens?: number;
+  };
 }
 
 async function mapUpstreamError(response: Response): Promise<string> {
@@ -76,6 +83,9 @@ export class OpenAiProvider implements AiProvider {
               stream: true,
               temperature: request.temperature,
               max_tokens: request.maxTokens,
+              // Without this, OpenAI never sends a `usage` object at all on a
+              // streamed response — this is the only way to get token counts here.
+              stream_options: { include_usage: true },
             }),
             signal: request.abortSignal,
           }),
@@ -113,6 +123,12 @@ export class OpenAiProvider implements AiProvider {
     const decoder = new TextDecoder();
     let buffer = '';
     let doneEmitted = false;
+    // `finish_reason` and `usage` arrive on two separate trailing chunks (usage
+    // strictly after finish_reason, in its own chunk with an empty `choices` array —
+    // see the `stream_options.include_usage` request flag above) — both are captured
+    // here and combined into one `done` event once the stream actually ends.
+    let finishReason: string | undefined;
+    let usage: { inputTokens: number; outputTokens: number } | undefined;
 
     try {
       while (true) {
@@ -130,7 +146,11 @@ export class OpenAiProvider implements AiProvider {
           if (jsonText === '[DONE]') {
             if (!doneEmitted) {
               doneEmitted = true;
-              yield { type: 'done', finishReason: 'stop' };
+              yield {
+                type: 'done',
+                finishReason: finishReason ?? 'stop',
+                usage,
+              };
             }
             return;
           }
@@ -148,13 +168,18 @@ export class OpenAiProvider implements AiProvider {
           const delta = choice?.delta?.content;
           if (delta) yield { type: 'token', delta };
           if (choice?.finish_reason) {
-            doneEmitted = true;
-            yield { type: 'done', finishReason: choice.finish_reason };
+            finishReason = choice.finish_reason;
+          }
+          if (chunk.usage) {
+            usage = {
+              inputTokens: chunk.usage.prompt_tokens ?? 0,
+              outputTokens: chunk.usage.completion_tokens ?? 0,
+            };
           }
         }
       }
       if (!doneEmitted) {
-        yield { type: 'done', finishReason: 'stop' };
+        yield { type: 'done', finishReason: finishReason ?? 'stop', usage };
       }
     } catch (err) {
       if (request.abortSignal.aborted) {

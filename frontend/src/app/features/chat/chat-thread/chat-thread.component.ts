@@ -8,12 +8,13 @@ import {
   signal,
   viewChild,
 } from '@angular/core';
+import { DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ChatStore } from '../chat.store';
 
 @Component({
   selector: 'app-chat-thread',
-  imports: [FormsModule],
+  imports: [FormsModule, DecimalPipe],
   templateUrl: './chat-thread.component.html',
   styleUrl: './chat-thread.component.scss',
 })

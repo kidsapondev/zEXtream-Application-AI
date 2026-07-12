@@ -67,15 +67,25 @@ export class MessagesService {
     return message !== null;
   }
 
+  /**
+   * `tokenCount` is the total (prompt + completion) token cost of this exchange, when
+   * the provider reported usage — `Message` has one column, not separate input/output
+   * ones, so this is the natural "how much did this response cost" number rather than
+   * two. `undefined` (provider didn't report usage, or the stream errored before any
+   * `done` event) leaves the column untouched at its default `null`, not `0` — a
+   * message with unknown cost must stay visually distinct from one that's genuinely
+   * free/errored-with-no-usage.
+   */
   finalizeAssistantMessage(
     messageId: string,
     content: string,
     status: 'complete' | 'error' | 'stopped',
     errorMessage?: string,
+    tokenCount?: number,
   ) {
     return this.prisma.message.update({
       where: { id: messageId },
-      data: { content, streamingStatus: status, errorMessage },
+      data: { content, streamingStatus: status, errorMessage, tokenCount },
     });
   }
 

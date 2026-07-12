@@ -32,6 +32,7 @@ describe('ChatStore', () => {
       model: 'qwen2.5-coder:14b',
       streamingStatus: 'complete',
       errorMessage: null,
+      tokenCount: null,
       createdAt: new Date().toISOString(),
       ...overrides,
     };

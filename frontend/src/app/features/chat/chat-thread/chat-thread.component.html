@@ -33,6 +33,9 @@
           @if (message.streamingStatus === 'error') {
             <span class="message__error" role="alert">{{ message.errorMessage }}</span>
           }
+          @if (message.role === 'assistant' && message.tokenCount != null) {
+            <span class="message__meta">{{ message.tokenCount | number }} tokens</span>
+          }
         </div>
       </div>
     }

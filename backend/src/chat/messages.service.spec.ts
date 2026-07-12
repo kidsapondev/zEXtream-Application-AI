@@ -4,6 +4,7 @@ describe('MessagesService', () => {
   const prisma = {
     message: {
       findMany: jest.fn(),
+      update: jest.fn(),
     },
   };
   const service = new MessagesService(prisma as never);
@@ -34,6 +35,46 @@ describe('MessagesService', () => {
         orderBy: { createdAt: 'asc' },
         take: 25,
         skip: 50,
+      });
+    });
+  });
+
+  describe('finalizeAssistantMessage', () => {
+    it('persists the reported tokenCount alongside content and status', async () => {
+      prisma.message.update.mockResolvedValue({});
+
+      await service.finalizeAssistantMessage(
+        'message-1',
+        'hello',
+        'complete',
+        undefined,
+        46,
+      );
+
+      expect(prisma.message.update).toHaveBeenCalledWith({
+        where: { id: 'message-1' },
+        data: {
+          content: 'hello',
+          streamingStatus: 'complete',
+          errorMessage: undefined,
+          tokenCount: 46,
+        },
+      });
+    });
+
+    it('leaves tokenCount as undefined (column stays null) when the provider reported no usage', async () => {
+      prisma.message.update.mockResolvedValue({});
+
+      await service.finalizeAssistantMessage('message-1', 'hello', 'complete');
+
+      expect(prisma.message.update).toHaveBeenCalledWith({
+        where: { id: 'message-1' },
+        data: {
+          content: 'hello',
+          streamingStatus: 'complete',
+          errorMessage: undefined,
+          tokenCount: undefined,
+        },
       });
     });
   });
