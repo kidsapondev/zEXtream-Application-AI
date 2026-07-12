@@ -1,212 +1,153 @@
-import { BadRequestException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { ProviderSettingsService } from './provider-settings.service';
 
+function createService(configValues: Record<string, string | undefined>) {
+  const configService = {
+    get: jest.fn((key: string) => configValues[key]),
+  };
+  return new ProviderSettingsService(configService as unknown as ConfigService);
+}
+
 describe('ProviderSettingsService', () => {
-  let lastUpsert: unknown;
-  const prisma = {
-    providerCredential: {
-      findMany: jest.fn(),
-      upsert: jest.fn((input: unknown) => {
-        lastUpsert = input;
-        return Promise.resolve({});
-      }),
-      deleteMany: jest.fn(),
-      findUnique: jest.fn(),
-    },
-  };
-  const encryption = {
-    encrypt: jest.fn(() => Buffer.from('ciphertext')),
-    decrypt: jest.fn(() => 'decrypted-key'),
-    version: 1,
-  };
-  const auditLog = { record: jest.fn() };
-  const service = new ProviderSettingsService(
-    prisma as never,
-    encryption as never,
-    auditLog as never,
-  );
+  const originalFetch = global.fetch;
 
-  beforeEach(() => {
-    jest.clearAllMocks();
-    lastUpsert = undefined;
+  afterEach(() => {
+    global.fetch = originalFetch;
   });
 
-  it('returns provider metadata without a plaintext credential', async () => {
-    prisma.providerCredential.findMany.mockResolvedValue([
-      { provider: 'openai', updatedAt: new Date('2026-01-01T00:00:00.000Z') },
-    ]);
-
-    const settings = await service.listForUser('user-1');
-
-    expect(settings).toEqual([
-      expect.objectContaining({
-        provider: 'ollama',
-        configured: true,
-        requiresApiKey: false,
-      }),
-      expect.objectContaining({
-        provider: 'claude',
-        configured: false,
-        requiresApiKey: true,
-      }),
-      expect.objectContaining({
-        provider: 'openai',
-        configured: true,
-        requiresApiKey: true,
-      }),
-    ]);
-    expect(JSON.stringify(settings)).not.toContain('ciphertext');
-  });
-
-  it('encrypts and upserts a provider key without retaining plaintext in Prisma data', async () => {
-    await service.upsertApiKey('user-1', 'openai', '  live-key  ');
-
-    expect(encryption.encrypt).toHaveBeenCalledWith('live-key');
-    const input = lastUpsert as {
-      where: { userId_provider: { userId: string; provider: string } };
-      create: { encryptedApiKey: Uint8Array };
-    };
-    expect(input.where).toEqual({
-      userId_provider: { userId: 'user-1', provider: 'openai' },
-    });
-    expect(input.create.encryptedApiKey).toBeInstanceOf(Uint8Array);
-    expect(auditLog.record).toHaveBeenCalledWith('provider_credential.upsert', {
-      userId: 'user-1',
-      provider: 'openai',
-      outcome: 'success',
-    });
-  });
-
-  it('records a credential removal without including the key value', async () => {
-    prisma.providerCredential.deleteMany.mockResolvedValue({ count: 1 });
-
-    await service.removeApiKey('user-1', 'claude');
-
-    expect(auditLog.record).toHaveBeenCalledWith('provider_credential.remove', {
-      userId: 'user-1',
-      provider: 'claude',
-      outcome: 'success',
-    });
-    expect(JSON.stringify(auditLog.record.mock.calls)).not.toContain(
-      'decrypted-key',
-    );
-  });
-
-  it('rejects keys for providers that do not use a credential', async () => {
-    await expect(
-      service.upsertApiKey('user-1', 'ollama', 'not-used'),
-    ).rejects.toBeInstanceOf(BadRequestException);
-    expect(prisma.providerCredential.upsert).not.toHaveBeenCalled();
-  });
-
-  it('includes a static model catalog per provider, empty for ollama', async () => {
-    prisma.providerCredential.findMany.mockResolvedValue([]);
-
-    const settings = await service.listForUser('user-1');
-
-    const byProvider = new Map(settings.map((s) => [s.provider, s.models]));
-    expect(byProvider.get('ollama')).toEqual([]);
-    expect(byProvider.get('claude')?.length).toBeGreaterThan(0);
-    expect(byProvider.get('openai')?.length).toBeGreaterThan(0);
-  });
-
-  describe('hasApiKey', () => {
-    it('is always true for ollama without querying the database', async () => {
-      const result = await service.hasApiKey('user-1', 'ollama');
-
-      expect(result).toBe(true);
-      expect(prisma.providerCredential.findUnique).not.toHaveBeenCalled();
-    });
-
-    it('reflects whether a credential row exists, without decrypting it', async () => {
-      prisma.providerCredential.findUnique.mockResolvedValue({
-        provider: 'claude',
+  describe('ollama', () => {
+    it('reports the live models pulled on the Ollama instance as configured', async () => {
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            models: [{ name: 'qwen2.5-coder:14b' }, { name: 'llama3' }],
+          }),
+      }) as never;
+      const service = createService({
+        OLLAMA_BASE_URL: 'http://localhost:11434',
       });
 
-      const result = await service.hasApiKey('user-1', 'claude');
+      const settings = await service.list();
 
-      expect(result).toBe(true);
-      expect(encryption.decrypt).not.toHaveBeenCalled();
+      const ollama = settings.find((s) => s.provider === 'ollama')!;
+      expect(ollama.models).toEqual(['qwen2.5-coder:14b', 'llama3']);
+      expect(ollama.configured).toBe(true);
+      expect(ollama.requiresApiKey).toBe(false);
+      const [url, init] = (global.fetch as jest.Mock).mock.calls[0] as [
+        string,
+        { signal: AbortSignal },
+      ];
+      expect(url).toBe('http://localhost:11434/api/tags');
+      expect(init.signal).toBeInstanceOf(AbortSignal);
     });
 
-    it('returns false when no credential row exists', async () => {
-      prisma.providerCredential.findUnique.mockResolvedValue(null);
+    it('reports unconfigured with an empty model list when Ollama is unreachable', async () => {
+      global.fetch = jest
+        .fn()
+        .mockRejectedValue(new Error('ECONNREFUSED')) as never;
+      const service = createService({
+        OLLAMA_BASE_URL: 'http://localhost:11434',
+      });
 
-      const result = await service.hasApiKey('user-1', 'openai');
+      const settings = await service.list();
 
-      expect(result).toBe(false);
+      const ollama = settings.find((s) => s.provider === 'ollama')!;
+      expect(ollama.models).toEqual([]);
+      expect(ollama.configured).toBe(false);
     });
-  });
 
-  describe('testConnection', () => {
-    const originalFetch = global.fetch;
-
-    afterEach(() => {
-      global.fetch = originalFetch;
-    });
-
-    it('returns a clear message when no API key is configured, without calling fetch', async () => {
-      prisma.providerCredential.findUnique.mockResolvedValue(null);
+    it('reports unconfigured when OLLAMA_BASE_URL is unset, without calling fetch', async () => {
       global.fetch = jest.fn() as never;
+      const service = createService({});
 
-      const result = await service.testConnection('user-1', 'claude');
+      const available = await service.isProviderAvailable('ollama');
 
-      expect(result).toEqual({
-        success: false,
-        message: 'No API key configured',
+      expect(available).toBe(false);
+      expect(global.fetch).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('claude/openai (host-bridge)', () => {
+    it('reports claude configured with its fixed alias catalog when the bridge confirms it is logged in', async () => {
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ available: true }),
+      }) as never;
+      const service = createService({
+        CLAUDE_BRIDGE_URL: 'http://127.0.0.1:4171',
+        HOST_BRIDGE_TOKEN: 'test-token',
       });
+
+      const available = await service.isProviderAvailable('claude');
+
+      expect(available).toBe(true);
+      expect(global.fetch).toHaveBeenCalledWith(
+        'http://127.0.0.1:4171/claude/status',
+        expect.objectContaining({
+          headers: { 'x-bridge-token': 'test-token' },
+        }),
+      );
+    });
+
+    it('reports openai (codex) unconfigured when the bridge reports the CLI is not logged in', async () => {
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ available: false }),
+      }) as never;
+      const service = createService({
+        CODEX_BRIDGE_URL: 'http://127.0.0.1:4171',
+        HOST_BRIDGE_TOKEN: 'test-token',
+      });
+
+      const settings = await service.list();
+
+      const openai = settings.find((s) => s.provider === 'openai')!;
+      expect(openai.models).toEqual([]);
+      expect(openai.configured).toBe(false);
+      expect(openai.requiresApiKey).toBe(false);
+    });
+
+    it('reports unconfigured when the bridge URL or token is unset, without calling fetch', async () => {
+      global.fetch = jest.fn() as never;
+      const service = createService({ HOST_BRIDGE_TOKEN: 'test-token' });
+
+      const available = await service.isProviderAvailable('claude');
+
+      expect(available).toBe(false);
       expect(global.fetch).not.toHaveBeenCalled();
     });
 
-    it('never returns or logs the decrypted key, and succeeds on a 2xx response', async () => {
-      prisma.providerCredential.findUnique.mockResolvedValue({
-        provider: 'claude',
-        encryptedApiKey: Buffer.from('cipher'),
+    it('reports unconfigured when the bridge itself is unreachable', async () => {
+      global.fetch = jest
+        .fn()
+        .mockRejectedValue(new Error('ECONNREFUSED')) as never;
+      const service = createService({
+        CODEX_BRIDGE_URL: 'http://127.0.0.1:4171',
+        HOST_BRIDGE_TOKEN: 'test-token',
       });
-      global.fetch = jest.fn().mockResolvedValue({ ok: true }) as never;
 
-      const result = await service.testConnection('user-1', 'claude');
+      const available = await service.isProviderAvailable('openai');
 
-      expect(result).toEqual({ success: true });
-      expect(JSON.stringify(result)).not.toContain('decrypted-key');
+      expect(available).toBe(false);
     });
+  });
 
-    it('distinguishes an auth failure from a generic upstream failure', async () => {
-      prisma.providerCredential.findUnique.mockResolvedValue({
-        provider: 'openai',
-        encryptedApiKey: Buffer.from('cipher'),
+  describe('caching', () => {
+    it('does not re-fetch within the cache window for the same provider', async () => {
+      const fetchMock = jest.fn().mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ models: [{ name: 'llama3' }] }),
       });
-      global.fetch = jest.fn().mockResolvedValue({
-        ok: false,
-        status: 401,
-        json: () => Promise.resolve({}),
-      }) as never;
-
-      const result = await service.testConnection('user-1', 'openai');
-
-      expect(result).toEqual({
-        success: false,
-        message: 'Invalid or revoked API key',
+      global.fetch = fetchMock as never;
+      const service = createService({
+        OLLAMA_BASE_URL: 'http://localhost:11434',
       });
-    });
 
-    it('reports a network/upstream failure distinctly from an auth failure', async () => {
-      prisma.providerCredential.findUnique.mockResolvedValue({
-        provider: 'openai',
-        encryptedApiKey: Buffer.from('cipher'),
-      });
-      global.fetch = jest.fn().mockRejectedValue(new Error('timeout')) as never;
+      await service.isProviderAvailable('ollama');
+      await service.isProviderAvailable('ollama');
 
-      const result = await service.testConnection('user-1', 'openai');
-
-      expect(result.success).toBe(false);
-      expect(result.message).toContain('Could not reach OpenAI');
-    });
-
-    it('rejects testing a connection for a provider that does not accept a key', async () => {
-      await expect(
-        service.testConnection('user-1', 'ollama'),
-      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
     });
   });
 });

@@ -142,46 +142,38 @@ describe('Application security flows (e2e)', () => {
     ]);
   });
 
-  it('stores provider credentials encrypted and never returns a plaintext key', async () => {
+  it('reports claude/openai as unconfigured (no per-user key involved) when their host-bridge is unreachable', async () => {
     const user = await register('provider-settings');
 
-    await request(app.getHttpServer())
-      .put('/api/settings/providers/openai')
-      .set('Authorization', `Bearer ${user.accessToken}`)
-      .send({ apiKey: 'test-openai-secret' })
-      .expect(200)
-      .expect({ success: true });
-
-    const row = await prisma.providerCredential.findUnique({
-      where: { userId_provider: { userId: user.user.id, provider: 'openai' } },
-    });
-    expect(row).not.toBeNull();
-    expect(Buffer.from(row!.encryptedApiKey).toString('utf8')).not.toContain(
-      'test-openai-secret',
-    );
-
+    // claude/openai no longer take a per-user API key at all — availability is
+    // server-wide, driven by the host-bridge (see ProviderSettingsService). This e2e
+    // suite deliberately leaves CLAUDE_BRIDGE_URL/CODEX_BRIDGE_URL unset (see
+    // setup-e2e.ts), so both report unconfigured here — the same "bridge not running"
+    // state a real deployment would show if the host-bridge process were down.
     const settings = await request(app.getHttpServer())
       .get('/api/settings/providers')
       .set('Authorization', `Bearer ${user.accessToken}`)
       .expect(200);
     expect(settings.body).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ provider: 'openai', configured: true }),
+        expect.objectContaining({
+          provider: 'claude',
+          requiresApiKey: false,
+          configured: false,
+        }),
+        expect.objectContaining({
+          provider: 'openai',
+          requiresApiKey: false,
+          configured: false,
+        }),
       ]),
     );
-    expect(JSON.stringify(settings.body)).not.toContain('test-openai-secret');
 
+    // The BYOK endpoints are gone entirely — confirm they're no longer routed.
     await request(app.getHttpServer())
-      .delete('/api/settings/providers/openai')
+      .put('/api/settings/providers/openai')
       .set('Authorization', `Bearer ${user.accessToken}`)
-      .expect(200)
-      .expect({ success: true });
-    await expect(
-      prisma.providerCredential.findUnique({
-        where: {
-          userId_provider: { userId: user.user.id, provider: 'openai' },
-        },
-      }),
-    ).resolves.toBeNull();
+      .send({ apiKey: 'test-openai-secret' })
+      .expect(404);
   });
 });

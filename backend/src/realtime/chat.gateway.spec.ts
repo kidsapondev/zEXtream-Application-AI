@@ -114,7 +114,7 @@ describe('ChatGateway chat:send failure handling', () => {
     listLatestForSession: jest.fn(),
   };
   const providerSettingsService = {
-    getApiKeyForRuntime: jest.fn(),
+    isProviderAvailable: jest.fn(),
   };
   const usersService = {
     findById: jest.fn(() => Promise.resolve({ role: 'user' })),
@@ -158,6 +158,7 @@ describe('ChatGateway chat:send failure handling', () => {
     sessionsService.touch.mockResolvedValue(undefined);
     sessionsService.setTitleIfDefault.mockResolvedValue(undefined);
     streamRegistry.hasActiveStream.mockReturnValue(false);
+    providerSettingsService.isProviderAvailable.mockResolvedValue(true);
     messagesService.createUserMessage.mockResolvedValue({
       id: 'user-message',
       sessionId: 'session-1',
@@ -470,9 +471,9 @@ describe('ChatGateway chat:send failure handling', () => {
     ).not.toHaveBeenCalled();
   });
 
-  it('rejects claude/openai sends when the user has no configured API key, before persisting the prompt', async () => {
+  it('rejects a send when the provider is not currently available, before persisting the prompt', async () => {
     aiProviderFactory.hasProvider.mockReturnValue(true);
-    providerSettingsService.getApiKeyForRuntime.mockResolvedValue(null);
+    providerSettingsService.isProviderAvailable.mockResolvedValue(false);
 
     await expect(
       gateway.onChatSend(client, {
@@ -482,36 +483,13 @@ describe('ChatGateway chat:send failure handling', () => {
       }),
     ).rejects.toBeInstanceOf(WsException);
 
-    expect(providerSettingsService.getApiKeyForRuntime).toHaveBeenCalledWith(
-      'user-1',
+    expect(providerSettingsService.isProviderAvailable).toHaveBeenCalledWith(
       'claude',
     );
     expect(messagesService.createUserMessage).not.toHaveBeenCalled();
   });
 
-  it('passes the resolved API key to non-ollama providers', async () => {
-    aiProviderFactory.hasProvider.mockReturnValue(true);
-    providerSettingsService.getApiKeyForRuntime.mockResolvedValue(
-      'decrypted-key',
-    );
-    const streamChat = jest.fn(function* () {
-      yield { type: 'done' as const, finishReason: 'stop' as const };
-    });
-    aiProviderFactory.getProvider.mockReturnValue({ streamChat });
-    streamRegistry.register.mockReturnValue(new AbortController());
-
-    await gateway.onChatSend(client, {
-      sessionId: 'session-1',
-      content: 'hello',
-      provider: 'claude',
-    });
-
-    expect(streamChat).toHaveBeenCalledWith(
-      expect.objectContaining({ apiKey: 'decrypted-key' }),
-    );
-  });
-
-  it('does not resolve an API key for ollama sends', async () => {
+  it('never checks bridge/key availability for ollama sends (unreachable Ollama fails per-message instead, not a blanket rejection)', async () => {
     aiProviderFactory.hasProvider.mockReturnValue(true);
     const streamChat = jest.fn(function* () {
       yield { type: 'done' as const, finishReason: 'stop' as const };
@@ -524,10 +502,11 @@ describe('ChatGateway chat:send failure handling', () => {
       content: 'hello',
     });
 
-    expect(providerSettingsService.getApiKeyForRuntime).not.toHaveBeenCalled();
-    expect(streamChat).toHaveBeenCalledWith(
-      expect.objectContaining({ apiKey: undefined }),
-    );
+    expect(providerSettingsService.isProviderAvailable).not.toHaveBeenCalled();
+    const calls = (streamChat as jest.Mock).mock.calls as Array<
+      [{ apiKey?: string }]
+    >;
+    expect(calls[0][0].apiKey).toBeUndefined();
   });
 
   it('derives and persists a session title from the first message when the title is still the default', async () => {

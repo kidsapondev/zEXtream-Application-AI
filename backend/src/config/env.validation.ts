@@ -66,6 +66,24 @@ export const envSchema = z.object({
       'must be a 32-byte Base64/Base64url value or 64-character hex value',
     ),
   OLLAMA_BASE_URL: z.string().url(),
+  // The claude/openai providers no longer call Anthropic/OpenAI's APIs with a per-user
+  // key — they call a small "host-bridge" service (see host-bridge/) that runs directly
+  // on the deployment host (not in Docker) and spawns the host's already-logged-in
+  // claude/codex CLIs. Optional: a deployment that only uses Ollama never needs these,
+  // and the providers report "unavailable" (not a startup crash) when unset — see
+  // ClaudeProvider/OpenAiProvider's constructor.
+  CLAUDE_BRIDGE_URL: z.preprocess(
+    (value) => (value === '' ? undefined : value),
+    z.url().optional(),
+  ),
+  CODEX_BRIDGE_URL: z.preprocess(
+    (value) => (value === '' ? undefined : value),
+    z.url().optional(),
+  ),
+  HOST_BRIDGE_TOKEN: z.preprocess(
+    (value) => (value === '' ? undefined : value),
+    z.string().min(16).optional(),
+  ),
   // Comma-separated allowlist of exact origins allowed to make credentialed cross-origin
   // requests (e.g. "http://localhost:4200,https://staging.example.com"). Kept
   // backward-compatible with the historical single-origin value. Left unset in

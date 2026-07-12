@@ -18,8 +18,12 @@ provider credentials.
   else (`backend/src/chat/chat-sessions.controller.ts`,
   `backend/src/artifacts/artifacts.controller.ts`) — a 404/403 there stops
   the request before any data lookup.
-- `ProviderSettingsService` scopes every query by `userId` from the JWT, not
-  from any client-supplied id (`backend/src/provider-settings/provider-settings.service.ts`).
+- `ProviderSettingsService` no longer stores or scopes any per-user data at all
+  (`backend/src/provider-settings/provider-settings.service.ts`) — claude/openai
+  dropped the per-user API key entirely in favor of a server-wide host-bridge (see
+  "Host-bridge command execution" below), so there's no longer a credential to leak
+  cross-user for those two providers. The `provider_credentials` table/model is kept in
+  the schema (avoids a migration) but nothing writes to it anymore.
 - `RefreshToken` rows are looked up by `id` (`tokenId` from the JWT payload)
   and then compared against `row.userId !== userId` before being trusted
   (`backend/src/auth/auth.service.ts` `refresh()`), so a stolen/forged
@@ -97,8 +101,11 @@ without direct mitigation:
 - Each user's data is already isolated by the cross-user-access controls
   above — a successful prompt injection in user A's own session can at
   worst make the AI misbehave *within A's own session*, since the AI has no
-  tool/API access to other users' sessions, artifacts, or credentials (no
-  function-calling/tool-use wired up in this app at all today).
+  tool/API access to other users' sessions, artifacts, or credentials. This app's own
+  Ollama/Claude(API)/OpenAI(API) integrations never wire up function-calling/tool-use.
+  The one exception is the optional claude/openai host-bridge (see "Host-bridge command
+  execution" below), where the *underlying CLI* is a tool-capable coding agent by
+  default — mitigated there, not by this app's own request/response handling.
 - Artifact filenames extracted from AI output are strictly normalized
   (see below) before ever being used as a lookup key, so a prompt-injected
   response can't use a crafted filename to escape its own session's
@@ -110,6 +117,53 @@ without direct mitigation:
 
 If/when tool-use or cross-session AI capabilities are added, this section
 needs to be revisited before shipping them.
+
+## Host-bridge command execution (claude/codex, optional feature)
+
+**Risk**: claude/openai are optionally backed by `host-bridge/`, which spawns the
+deployment host's own `claude`/`codex` CLIs — both are coding agents that can run shell
+commands and edit files by default. Without mitigation, any web user's chat message
+could make the agent execute a real command or write a real file on the deployment
+host, under the host operator's own login.
+
+**Mitigated**:
+
+- Every bridge invocation disables tool-use: `--tools ""` for claude, `--sandbox
+  read-only` for codex (`host-bridge/src/claude.ts`, `host-bridge/src/codex.ts`).
+  Verified by hand, not assumed: with `--tools ""` and a prompt asking it to run
+  `whoami`, the model produced a *fabricated* plausible-looking answer rather than
+  actually executing anything — confirming no tools were genuinely available, not just
+  declined.
+- Because a tool-less model will still confabulate a fake "I ran it, here's the output"
+  answer if it believes it has tools, every invocation also prepends a system-prompt
+  preamble stating explicitly that no tools exist and it must say so rather than
+  inventing a result (`host-bridge/src/prompt.ts`'s `SAFETY_PREAMBLE`) — this is a
+  correctness/trust mitigation, not an additional security boundary (the flags above
+  are what actually prevents execution).
+- Every spawned process runs with `cwd` set to a neutral scratch directory
+  (`BRIDGE_NEUTRAL_CWD`, defaults to the OS temp dir) — deliberately outside any git
+  repo and free of any `CLAUDE.md`/`AGENTS.md`, so a chat user's prompt can't pick up
+  this repo's (or any other project's) own instructions/memory.
+- The bridge only accepts requests carrying `HOST_BRIDGE_TOKEN` in an `x-bridge-token`
+  header (`host-bridge/src/auth-middleware.ts`, constant-time compare) — anything else
+  reachable on that host port cannot spawn the CLIs.
+
+**Accepted risk / not fully closed**:
+
+- `codex`'s `--sandbox read-only` is a genuine sandbox (blocks writes and most
+  meaningfully dangerous operations) but is not verified to be as strictly "zero tool
+  calls ever" as claude's `--tools ""` — codex may still be able to attempt read-only
+  shell/file operations within the sandbox. Not tested further to avoid running up
+  additional billed CLI calls purely to probe this; treat codex's floor as "sandboxed,
+  not tool-free" until verified otherwise.
+- Every web user of this deployment shares the **one** host operator's login/session —
+  there's no per-user isolation, quota, or blast-radius limit at the CLI-auth level.
+  This is inherent to the feature's whole premise (reuse the host's own subscription
+  instead of per-user API keys) and is why `docs/deployment.md` calls this
+  personal/small-team-only, not something safe to expose broadly.
+- This entire feature is opt-in (unset `CLAUDE_BRIDGE_URL`/`CODEX_BRIDGE_URL` disables
+  it entirely, falling back to "unavailable" for those two providers) — a deployment
+  that never sets these env vars carries none of the above risk.
 
 ## Artifact filename attacks
 
@@ -226,3 +280,4 @@ what a human can review.
 | Backoffice privilege escalation | Mitigated (DB-checked permissions, self-lockout guard, audit trail) |
 | `BOOTSTRAP_ADMIN_EMAILS` standing access | **Accepted operational risk** — must be cleared/narrowed before real production launch |
 | Unactivated (guest) account resource use | Mitigated (`GuestBlockGuard` REST default-deny, per-handler WS check) |
+| Host-bridge command execution (claude/codex, optional) | Mitigated (tool-use disabled, verified by hand; bridge token auth); codex's sandbox floor not fully verified as tool-free — accepted |

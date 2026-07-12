@@ -1,234 +1,147 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { AiProvider } from '@prisma/client';
-import { AuditLogService } from '../common/audit-log.service';
-import { PrismaService } from '../prisma/prisma.service';
-import { ApiKeyEncryptionService } from './api-key-encryption.service';
 
-const API_KEY_PROVIDERS = new Set<AiProvider>(['claude', 'openai']);
+const OLLAMA_TAGS_TIMEOUT_MS = 3_000;
+const BRIDGE_STATUS_TIMEOUT_MS = 5_000;
 
 /**
- * Static capability metadata per provider, consumed by the frontend model
- * selector. Ollama has no fixed catalog (it's locally configured and the
- * user can run whatever model they've pulled), so its list is empty.
- *
- * The claude/openai model IDs below are illustrative current-generation
- * placeholders meant to wire the shape end-to-end, not a guarantee that
- * these exact IDs exist upstream — update this list as the real catalogs
- * change; nothing else needs to change to pick up new values.
+ * How long a provider's model list / availability is trusted before re-checking —
+ * long enough that `GET /api/settings/providers` polling and back-to-back `chat:send`
+ * calls don't spam Ollama's `/api/tags` or spawn `claude auth status`/`codex login
+ * status` on every request; short enough that pulling a new Ollama model or the CLI's
+ * login state changing is picked up within one refresh, not stale forever.
  */
-const PROVIDER_MODELS: Record<AiProvider, string[]> = {
-  ollama: [],
-  claude: ['claude-sonnet-5', 'claude-opus-4-8', 'claude-haiku-4-5'],
-  openai: ['gpt-5.1', 'gpt-5.1-mini'],
-};
+const AVAILABILITY_CACHE_MS = 10_000;
 
-function toPrismaBytes(value: Buffer): Uint8Array<ArrayBuffer> {
-  return Uint8Array.from(value);
+/**
+ * `claude.exe`'s documented model aliases (verified: `--model haiku` works). No fixed
+ * catalog endpoint exists to query this live, unlike Ollama's `/api/tags`.
+ */
+const CLAUDE_MODELS = ['sonnet', 'opus', 'haiku'];
+
+/**
+ * The one codex.exe model confirmed to work on this deployment (`~/.codex/config.toml`'s
+ * configured default, verified via a real `codex exec` call). Codex has no queryable
+ * model-catalog endpoint either, and further aliases weren't tested to avoid running up
+ * more billed CLI calls purely to enumerate options — expand this list once other model
+ * IDs are confirmed to work.
+ */
+const CODEX_MODELS = ['gpt-5.6-sol'];
+
+interface CachedModels {
+  models: string[];
+  checkedAt: number;
 }
 
-function assertApiKeyProvider(
-  provider: string,
-): asserts provider is AiProvider {
-  if (!API_KEY_PROVIDERS.has(provider as AiProvider)) {
-    throw new BadRequestException(
-      'Only claude and openai accept a provider API key',
-    );
-  }
-}
-
-export interface ConnectionTestResult {
-  success: boolean;
-  message?: string;
-}
-
-async function extractUpstreamErrorMessage(
-  response: Response,
-): Promise<string | undefined> {
-  try {
-    const body = (await response.json()) as {
-      error?: { message?: string };
-    };
-    return body?.error?.message;
-  } catch {
-    return undefined;
-  }
-}
-
+/**
+ * claude/openai no longer call Anthropic/OpenAI's APIs with a per-user key — both
+ * providers now call a "host-bridge" service (see `host-bridge/`) that spawns the
+ * deployment host's already-logged-in `claude`/`codex` CLIs. Availability is therefore
+ * server-wide (is the bridge reachable and the CLI logged in?), not per-user, and
+ * `models` reflects what's genuinely usable right now rather than a fixed catalog:
+ * Ollama's list comes live from `/api/tags`, and claude/openai (codex) only report
+ * their fixed alias list when the bridge confirms the CLI is actually logged in.
+ */
 @Injectable()
 export class ProviderSettingsService {
-  constructor(
-    private readonly prisma: PrismaService,
-    private readonly encryption: ApiKeyEncryptionService,
-    private readonly auditLog: AuditLogService,
-  ) {}
+  private readonly cache = new Map<AiProvider, CachedModels>();
 
-  async listForUser(userId: string) {
-    const credentials = await this.prisma.providerCredential.findMany({
-      where: { userId },
-      select: { provider: true, updatedAt: true },
-    });
-    const configured = new Map(
-      credentials.map((credential) => [
-        credential.provider,
-        credential.updatedAt,
-      ]),
-    );
-    return (['ollama', 'claude', 'openai'] as const).map((provider) => ({
-      provider,
-      requiresApiKey: provider !== 'ollama',
-      configured: provider === 'ollama' || configured.has(provider),
-      updatedAt: configured.get(provider) ?? null,
-      models: PROVIDER_MODELS[provider],
-    }));
-  }
+  constructor(private readonly configService: ConfigService) {}
 
-  /** Existence check only — never decrypts the key. Used to gate session creation. */
-  async hasApiKey(userId: string, provider: AiProvider): Promise<boolean> {
-    if (!API_KEY_PROVIDERS.has(provider)) return true;
-    const credential = await this.prisma.providerCredential.findUnique({
-      where: { userId_provider: { userId, provider } },
-      select: { provider: true },
-    });
-    return credential !== null;
-  }
-
-  async upsertApiKey(userId: string, provider: string, apiKey: string) {
-    assertApiKeyProvider(provider);
-    const encryptedApiKey = toPrismaBytes(
-      this.encryption.encrypt(apiKey.trim()),
-    );
-    await this.prisma.providerCredential.upsert({
-      where: { userId_provider: { userId, provider } },
-      create: {
-        userId,
-        provider,
-        encryptedApiKey,
-        encryptionVersion: this.encryption.version,
-      },
-      update: {
-        encryptedApiKey,
-        encryptionVersion: this.encryption.version,
-      },
-    });
-    this.auditLog.record('provider_credential.upsert', {
-      userId,
-      provider,
-      outcome: 'success',
-    });
-  }
-
-  async removeApiKey(userId: string, provider: string) {
-    assertApiKeyProvider(provider);
-    await this.prisma.providerCredential.deleteMany({
-      where: { userId, provider },
-    });
-    this.auditLog.record('provider_credential.remove', {
-      userId,
-      provider,
-      outcome: 'success',
-    });
-  }
-
-  async getApiKeyForRuntime(
-    userId: string,
-    provider: AiProvider,
-  ): Promise<string | null> {
-    if (!API_KEY_PROVIDERS.has(provider)) return null;
-    const credential = await this.prisma.providerCredential.findUnique({
-      where: { userId_provider: { userId, provider } },
-    });
-    return credential
-      ? this.encryption.decrypt(credential.encryptedApiKey)
-      : null;
-  }
-
-  /**
-   * Makes one minimal real request to the provider using the user's stored
-   * key to confirm it is valid and the provider is reachable. Never returns
-   * or logs the key itself — only a success flag and a human-readable
-   * failure reason (auth failure vs. network/upstream failure).
-   */
-  async testConnection(
-    userId: string,
-    provider: string,
-  ): Promise<ConnectionTestResult> {
-    assertApiKeyProvider(provider);
-    const credential = await this.prisma.providerCredential.findUnique({
-      where: { userId_provider: { userId, provider } },
-    });
-    if (!credential) {
-      return { success: false, message: 'No API key configured' };
-    }
-    const apiKey = this.encryption.decrypt(credential.encryptedApiKey);
-    return provider === 'claude'
-      ? testClaudeConnection(apiKey)
-      : testOpenAiConnection(apiKey);
-  }
-}
-
-async function testClaudeConnection(
-  apiKey: string,
-): Promise<ConnectionTestResult> {
-  try {
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'claude-haiku-4-5',
-        max_tokens: 1,
-        messages: [{ role: 'user', content: 'ping' }],
+  /** No longer "for" any particular user — availability is server-wide now (see the
+   * class doc comment above), kept as a method for symmetry with the rest of the
+   * service and in case a future per-user override is ever reintroduced. */
+  async list() {
+    const providers = await Promise.all(
+      (['ollama', 'claude', 'openai'] as const).map(async (provider) => {
+        const models = await this.modelsFor(provider);
+        return {
+          provider,
+          requiresApiKey: false,
+          configured: models.length > 0,
+          updatedAt: null,
+          models,
+        };
       }),
-    });
-    if (response.ok) return { success: true };
-    if (response.status === 401 || response.status === 403) {
-      return { success: false, message: 'Invalid or revoked API key' };
-    }
-    const upstreamMessage = await extractUpstreamErrorMessage(response);
-    return {
-      success: false,
-      message: upstreamMessage ?? `Claude returned HTTP ${response.status}`,
-    };
-  } catch (error) {
-    return {
-      success: false,
-      message: `Could not reach Claude: ${(error as Error).message}`,
-    };
+    );
+    return providers;
   }
-}
 
-async function testOpenAiConnection(
-  apiKey: string,
-): Promise<ConnectionTestResult> {
-  try {
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'gpt-5.1-mini',
-        max_tokens: 1,
-        messages: [{ role: 'user', content: 'ping' }],
-      }),
-    });
-    if (response.ok) return { success: true };
-    if (response.status === 401 || response.status === 403) {
-      return { success: false, message: 'Invalid or revoked API key' };
+  async isProviderAvailable(provider: AiProvider): Promise<boolean> {
+    const models = await this.modelsFor(provider);
+    return models.length > 0;
+  }
+
+  private async modelsFor(provider: AiProvider): Promise<string[]> {
+    const cached = this.cache.get(provider);
+    if (cached && Date.now() - cached.checkedAt < AVAILABILITY_CACHE_MS) {
+      return cached.models;
     }
-    const upstreamMessage = await extractUpstreamErrorMessage(response);
-    return {
-      success: false,
-      message: upstreamMessage ?? `OpenAI returned HTTP ${response.status}`,
-    };
-  } catch (error) {
-    return {
-      success: false,
-      message: `Could not reach OpenAI: ${(error as Error).message}`,
-    };
+    const models = await this.fetchModels(provider);
+    this.cache.set(provider, { models, checkedAt: Date.now() });
+    return models;
+  }
+
+  private fetchModels(provider: AiProvider): Promise<string[]> {
+    if (provider === 'ollama') return this.fetchOllamaModels();
+    if (provider === 'claude') {
+      return this.fetchBridgeModels(
+        'claude',
+        'CLAUDE_BRIDGE_URL',
+        CLAUDE_MODELS,
+      );
+    }
+    return this.fetchBridgeModels('codex', 'CODEX_BRIDGE_URL', CODEX_MODELS);
+  }
+
+  private async fetchOllamaModels(): Promise<string[]> {
+    const baseUrl = this.configService.get<string>('OLLAMA_BASE_URL');
+    if (!baseUrl) return [];
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), OLLAMA_TAGS_TIMEOUT_MS);
+    try {
+      const response = await fetch(`${baseUrl}/api/tags`, {
+        signal: controller.signal,
+      });
+      if (!response.ok) return [];
+      const body = (await response.json()) as {
+        models?: Array<{ name: string }>;
+      };
+      return (body.models ?? []).map((model) => model.name);
+    } catch {
+      // Ollama unreachable/timed out — no models are usable, not an error page.
+      return [];
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  private async fetchBridgeModels(
+    kind: 'claude' | 'codex',
+    urlEnvKey: 'CLAUDE_BRIDGE_URL' | 'CODEX_BRIDGE_URL',
+    catalog: string[],
+  ): Promise<string[]> {
+    const bridgeUrl = this.configService.get<string>(urlEnvKey);
+    const token = this.configService.get<string>('HOST_BRIDGE_TOKEN');
+    if (!bridgeUrl || !token) return [];
+    const controller = new AbortController();
+    const timer = setTimeout(
+      () => controller.abort(),
+      BRIDGE_STATUS_TIMEOUT_MS,
+    );
+    try {
+      const response = await fetch(`${bridgeUrl}/${kind}/status`, {
+        headers: { 'x-bridge-token': token },
+        signal: controller.signal,
+      });
+      if (!response.ok) return [];
+      const body = (await response.json()) as { available?: boolean };
+      return body.available ? catalog : [];
+    } catch {
+      return [];
+    } finally {
+      clearTimeout(timer);
+    }
   }
 }

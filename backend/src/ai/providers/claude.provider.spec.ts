@@ -1,3 +1,4 @@
+import { ConfigService } from '@nestjs/config';
 import { ClaudeProvider } from './claude.provider';
 import { AiStreamEvent } from '../ai-provider.interface';
 import {
@@ -6,6 +7,22 @@ import {
 } from '../circuit-breaker.service';
 
 const encode = (text: string) => new TextEncoder().encode(text);
+
+function createProvider(
+  configValues: Record<string, string | undefined> = {
+    CLAUDE_BRIDGE_URL: 'http://127.0.0.1:4171',
+    HOST_BRIDGE_TOKEN: 'test-bridge-token',
+  },
+  circuitBreaker: CircuitBreakerService = new CircuitBreakerService(),
+): ClaudeProvider {
+  const configService = {
+    get: jest.fn((key: string) => configValues[key]),
+  };
+  return new ClaudeProvider(
+    configService as unknown as ConfigService,
+    circuitBreaker,
+  );
+}
 
 function createReader(readImpl: jest.Mock) {
   return { read: readImpl, cancel: jest.fn().mockResolvedValue(undefined) };
@@ -28,280 +45,116 @@ describe('ClaudeProvider', () => {
     global.fetch = originalFetch;
   });
 
-  it('yields an error immediately when no API key is configured, without calling fetch', async () => {
-    const provider = new ClaudeProvider(new CircuitBreakerService());
+  it('yields an error immediately when the host-bridge is not configured, without calling fetch', async () => {
+    const provider = createProvider({});
     global.fetch = jest.fn() as never;
 
     const events = await collect(
       provider.streamChat({
         messages: [{ role: 'user', content: 'hi' }],
-        model: 'claude-sonnet-5',
+        model: 'sonnet',
         abortSignal: new AbortController().signal,
       }),
     );
 
     expect(events).toEqual([
-      { type: 'error', message: 'No Claude API key configured' },
+      { type: 'error', message: 'Claude host-bridge is not configured' },
     ]);
     expect(global.fetch).not.toHaveBeenCalled();
   });
 
-  it('parses SSE content_block_delta/message_delta/message_stop into token/done events', async () => {
+  it('POSTs messages/model to /claude/chat with the bridge token header and re-yields its NDJSON events', async () => {
     const readImpl = jest
       .fn()
       .mockResolvedValueOnce({
         done: false,
         value: encode(
-          'event: content_block_delta\ndata: {"type":"content_block_delta","delta":{"text":"Hel"}}\n\n' +
-            'event: content_block_delta\ndata: {"type":"content_block_delta","delta":{"text":"lo"}}\n\n',
+          `${JSON.stringify({ type: 'token', delta: 'Hi there!' })}\n` +
+            `${JSON.stringify({ type: 'done', finishReason: 'stop', usage: { inputTokens: 60, outputTokens: 5 } })}\n`,
         ),
       })
-      .mockResolvedValueOnce({
-        done: false,
-        value: encode(
-          'event: message_delta\ndata: {"type":"message_delta","delta":{"stop_reason":"end_turn"}}\n\n' +
-            'event: message_stop\ndata: {"type":"message_stop"}\n\n',
-        ),
-      });
-    global.fetch = jest.fn().mockResolvedValue({
+      .mockResolvedValueOnce({ done: true, value: undefined });
+    const fetchMock = jest.fn().mockResolvedValue({
       ok: true,
       status: 200,
       body: { getReader: () => createReader(readImpl) },
-    }) as never;
+    });
+    global.fetch = fetchMock as never;
 
-    const provider = new ClaudeProvider(new CircuitBreakerService());
+    const provider = createProvider();
     const events = await collect(
       provider.streamChat({
-        messages: [
-          { role: 'system', content: 'be nice' },
-          { role: 'user', content: 'hi' },
-        ],
-        model: 'claude-sonnet-5',
-        apiKey: 'sk-test',
+        messages: [{ role: 'user', content: 'hi' }],
+        model: 'sonnet',
         abortSignal: new AbortController().signal,
       }),
     );
 
     expect(events).toEqual([
-      { type: 'token', delta: 'Hel' },
-      { type: 'token', delta: 'lo' },
-      { type: 'done', finishReason: 'end_turn' },
+      { type: 'token', delta: 'Hi there!' },
+      {
+        type: 'done',
+        finishReason: 'stop',
+        usage: { inputTokens: 60, outputTokens: 5 },
+      },
     ]);
 
-    const [, init] = (global.fetch as jest.Mock).mock.calls[0] as [
+    const [url, init] = fetchMock.mock.calls[0] as [
       string,
       { headers: Record<string, string>; body: string },
     ];
-    expect(init.headers['x-api-key']).toBe('sk-test');
-    expect(init.headers['anthropic-version']).toBe('2023-06-01');
-    const parsedBody = JSON.parse(init.body) as {
-      system?: string;
-      messages: unknown[];
-    };
-    expect(parsedBody.system).toBe('be nice');
-    expect(parsedBody.messages).toEqual([{ role: 'user', content: 'hi' }]);
-  });
-
-  it('combines input tokens from message_start with output tokens from message_delta into one usage', async () => {
-    const readImpl = jest
-      .fn()
-      .mockResolvedValueOnce({
-        done: false,
-        value: encode(
-          'event: message_start\ndata: {"type":"message_start","message":{"usage":{"input_tokens":12}}}\n\n' +
-            'event: content_block_delta\ndata: {"type":"content_block_delta","delta":{"text":"ok"}}\n\n',
-        ),
-      })
-      .mockResolvedValueOnce({
-        done: false,
-        value: encode(
-          'event: message_delta\ndata: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":34}}\n\n' +
-            'event: message_stop\ndata: {"type":"message_stop"}\n\n',
-        ),
-      });
-    global.fetch = jest.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-      body: { getReader: () => createReader(readImpl) },
-    }) as never;
-
-    const provider = new ClaudeProvider(new CircuitBreakerService());
-    const events = await collect(
-      provider.streamChat({
-        messages: [{ role: 'user', content: 'hi' }],
-        model: 'claude-sonnet-5',
-        apiKey: 'sk-test',
-        abortSignal: new AbortController().signal,
-      }),
-    );
-
-    expect(events).toEqual([
-      { type: 'token', delta: 'ok' },
-      {
-        type: 'done',
-        finishReason: 'end_turn',
-        usage: { inputTokens: 12, outputTokens: 34 },
-      },
-    ]);
-  });
-
-  it('skips a malformed/truncated SSE data frame and continues streaming', async () => {
-    const readImpl = jest.fn().mockResolvedValueOnce({
-      done: false,
-      value: encode(
-        'event: content_block_delta\ndata: {not-json\n\n' +
-          'event: content_block_delta\ndata: {"type":"content_block_delta","delta":{"text":"ok"}}\n\n' +
-          'event: message_stop\ndata: {"type":"message_stop"}\n\n',
-      ),
+    expect(url).toBe('http://127.0.0.1:4171/claude/chat');
+    expect(init.headers['x-bridge-token']).toBe('test-bridge-token');
+    expect(JSON.parse(init.body)).toEqual({
+      messages: [{ role: 'user', content: 'hi' }],
+      model: 'sonnet',
     });
-    global.fetch = jest.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-      body: { getReader: () => createReader(readImpl) },
-    }) as never;
-
-    const provider = new ClaudeProvider(new CircuitBreakerService());
-    const events = await collect(
-      provider.streamChat({
-        messages: [{ role: 'user', content: 'hi' }],
-        model: 'claude-sonnet-5',
-        apiKey: 'sk-test',
-        abortSignal: new AbortController().signal,
-      }),
-    );
-
-    expect(events).toEqual([
-      { type: 'token', delta: 'ok' },
-      { type: 'done', finishReason: 'stop' },
-    ]);
   });
 
-  it('maps a 401 response to an invalid-API-key error using the upstream message', async () => {
+  it('maps a non-ok bridge response to an error and records a circuit-breaker failure', async () => {
     global.fetch = jest.fn().mockResolvedValue({
       ok: false,
-      status: 401,
-      body: {},
-      json: () => Promise.resolve({ error: { message: 'invalid x-api-key' } }),
+      status: 503,
+      body: null,
     }) as never;
+    const circuitBreaker = new CircuitBreakerService();
+    const recordFailureSpy = jest.spyOn(circuitBreaker, 'recordFailure');
 
-    const provider = new ClaudeProvider(new CircuitBreakerService());
+    const provider = createProvider(undefined, circuitBreaker);
     const events = await collect(
       provider.streamChat({
         messages: [{ role: 'user', content: 'hi' }],
-        model: 'claude-sonnet-5',
-        apiKey: 'sk-bad',
+        model: 'sonnet',
         abortSignal: new AbortController().signal,
       }),
     );
 
-    expect(events).toEqual([{ type: 'error', message: 'invalid x-api-key' }]);
+    expect(events).toEqual([
+      { type: 'error', message: 'Claude host-bridge returned HTTP 503' },
+    ]);
+    expect(recordFailureSpy).toHaveBeenCalledWith('claude');
   });
 
-  it('maps a 429 response to a rate-limited error (after exhausting retries)', async () => {
-    jest.useFakeTimers();
-    try {
-      global.fetch = jest.fn().mockResolvedValue({
-        ok: false,
-        status: 429,
-        body: {},
-        json: () => Promise.resolve({}),
-      }) as never;
+  it('yields an error when the bridge cannot be reached', async () => {
+    global.fetch = jest
+      .fn()
+      .mockRejectedValue(new Error('connect ECONNREFUSED')) as never;
 
-      const provider = new ClaudeProvider(new CircuitBreakerService());
-      const promise = collect(
-        provider.streamChat({
-          messages: [{ role: 'user', content: 'hi' }],
-          model: 'claude-sonnet-5',
-          apiKey: 'sk-test',
-          abortSignal: new AbortController().signal,
-        }),
-      );
-      await jest.runAllTimersAsync();
-      const events = await promise;
+    const provider = createProvider();
+    const events = await collect(
+      provider.streamChat({
+        messages: [{ role: 'user', content: 'hi' }],
+        model: 'sonnet',
+        abortSignal: new AbortController().signal,
+      }),
+    );
 
-      expect(events).toEqual([
-        { type: 'error', message: 'Rate limited by Claude' },
-      ]);
-    } finally {
-      jest.useRealTimers();
-    }
-  });
-
-  it('maps a 5xx response to a temporarily-unavailable error (after exhausting retries)', async () => {
-    jest.useFakeTimers();
-    try {
-      global.fetch = jest.fn().mockResolvedValue({
-        ok: false,
-        status: 529,
-        body: {},
-        json: () => Promise.reject(new Error('no body')),
-      }) as never;
-
-      const provider = new ClaudeProvider(new CircuitBreakerService());
-      const promise = collect(
-        provider.streamChat({
-          messages: [{ role: 'user', content: 'hi' }],
-          model: 'claude-sonnet-5',
-          apiKey: 'sk-test',
-          abortSignal: new AbortController().signal,
-        }),
-      );
-      await jest.runAllTimersAsync();
-      const events = await promise;
-
-      expect(events).toEqual([
-        { type: 'error', message: 'Claude is temporarily unavailable' },
-      ]);
-    } finally {
-      jest.useRealTimers();
-    }
-  });
-
-  it('retries a transient failure and succeeds without surfacing an error', async () => {
-    jest.useFakeTimers();
-    try {
-      const readImpl = jest.fn().mockResolvedValueOnce({
-        done: false,
-        value: encode(
-          'event: content_block_delta\ndata: {"type":"content_block_delta","delta":{"text":"ok"}}\n\n' +
-            'event: message_stop\ndata: {"type":"message_stop"}\n\n',
-        ),
-      });
-      const fetchMock = jest
-        .fn()
-        .mockResolvedValueOnce({
-          ok: false,
-          status: 500,
-          body: {},
-          json: () => Promise.resolve({}),
-        })
-        .mockResolvedValueOnce({
-          ok: true,
-          status: 200,
-          body: { getReader: () => createReader(readImpl) },
-        });
-      global.fetch = fetchMock as never;
-
-      const provider = new ClaudeProvider(new CircuitBreakerService());
-      const promise = collect(
-        provider.streamChat({
-          messages: [{ role: 'user', content: 'hi' }],
-          model: 'claude-sonnet-5',
-          apiKey: 'sk-test',
-          abortSignal: new AbortController().signal,
-        }),
-      );
-      await jest.runAllTimersAsync();
-      const events = await promise;
-
-      expect(events).toEqual([
-        { type: 'token', delta: 'ok' },
-        { type: 'done', finishReason: 'stop' },
-      ]);
-      expect(fetchMock).toHaveBeenCalledTimes(2);
-    } finally {
-      jest.useRealTimers();
-    }
+    expect(events).toEqual([
+      {
+        type: 'error',
+        message: 'Could not reach the Claude host-bridge: connect ECONNREFUSED',
+      },
+    ]);
   });
 
   it('fails fast without calling fetch once the circuit is open', async () => {
@@ -311,12 +164,11 @@ describe('ClaudeProvider', () => {
     }
     global.fetch = jest.fn() as never;
 
-    const provider = new ClaudeProvider(circuitBreaker);
+    const provider = createProvider(undefined, circuitBreaker);
     const events = await collect(
       provider.streamChat({
         messages: [{ role: 'user', content: 'hi' }],
-        model: 'claude-sonnet-5',
-        apiKey: 'sk-test',
+        model: 'sonnet',
         abortSignal: new AbortController().signal,
       }),
     );
@@ -324,30 +176,6 @@ describe('ClaudeProvider', () => {
     expect(events).toHaveLength(1);
     expect(events[0].type).toBe('error');
     expect(global.fetch).not.toHaveBeenCalled();
-  });
-
-  it('repeated 401s (a bad key) never open the circuit for other users', async () => {
-    const circuitBreaker = new CircuitBreakerService();
-    global.fetch = jest.fn().mockResolvedValue({
-      ok: false,
-      status: 401,
-      body: {},
-      json: () => Promise.resolve({ error: { message: 'bad key' } }),
-    }) as never;
-
-    for (let i = 0; i < CIRCUIT_BREAKER_FAILURE_THRESHOLD + 2; i += 1) {
-      const provider = new ClaudeProvider(circuitBreaker);
-      await collect(
-        provider.streamChat({
-          messages: [{ role: 'user', content: 'hi' }],
-          model: 'claude-sonnet-5',
-          apiKey: 'sk-bad',
-          abortSignal: new AbortController().signal,
-        }),
-      );
-    }
-
-    expect(circuitBreaker.isOpen('claude')).toBe(false);
   });
 
   it('yields a stopped-done event when the caller aborts mid-stream', async () => {
@@ -360,9 +188,7 @@ describe('ClaudeProvider', () => {
       .fn()
       .mockResolvedValueOnce({
         done: false,
-        value: encode(
-          'event: content_block_delta\ndata: {"type":"content_block_delta","delta":{"text":"a"}}\n\n',
-        ),
+        value: encode(`${JSON.stringify({ type: 'token', delta: 'a' })}\n`),
       })
       .mockImplementationOnce(() => secondRead);
     global.fetch = jest.fn().mockResolvedValue({
@@ -371,12 +197,11 @@ describe('ClaudeProvider', () => {
       body: { getReader: () => createReader(readImpl) },
     }) as never;
 
-    const provider = new ClaudeProvider(new CircuitBreakerService());
+    const provider = createProvider();
     const iterator = provider
       .streamChat({
         messages: [{ role: 'user', content: 'hi' }],
-        model: 'claude-sonnet-5',
-        apiKey: 'sk-test',
+        model: 'sonnet',
         abortSignal: controller.signal,
       })
       [Symbol.asyncIterator]();

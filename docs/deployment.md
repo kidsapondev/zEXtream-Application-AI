@@ -431,6 +431,55 @@ provider's SDK the same way if Sentry isn't the vendor you land on —
 both initializers are small, isolated, and only wired in behind the
 "is a DSN configured" check.
 
+## Claude/Codex via host-bridge (optional)
+
+By default `claude`/`openai` (in the UI: Codex) are unavailable — only Ollama needs any
+setup. To make them usable **without per-user API keys**, this deployment can instead
+spawn the deployment host's own already-logged-in `claude`/`codex` CLIs on behalf of
+every chat user. This only makes sense for a **personal or small-team deployment run by
+whoever is logged into those CLIs** — every user of the web app shares that one login's
+subscription/quota, not their own billing. See `docs/threat-model.md` for the full list
+of trade-offs this implies (cost per message, no real token streaming, tool-use safety).
+
+### Why a separate host-bridge process
+
+`claude.exe`/`codex.exe` are native executables on the deployment host. The `backend`
+container (Linux) can't invoke a host `.exe` directly, so `host-bridge/` is a small
+standalone Node service that runs **directly on the host** (not in Docker, the same way
+Ollama itself already does) and exposes a tiny HTTP API the container reaches via
+`host.docker.internal`, exactly like `OLLAMA_BASE_URL` already does.
+
+### Setup
+
+1. Confirm both CLIs are installed and logged in on the host (`claude auth status`,
+   `codex login status` — both should report logged in without prompting).
+2. `cp host-bridge/.env.example host-bridge/.env` and fill in:
+   - `HOST_BRIDGE_TOKEN` — a long random secret (`openssl rand -base64 32`); must match
+     the backend's `HOST_BRIDGE_TOKEN` exactly.
+   - `CLAUDE_EXE_PATH` / `CODEX_EXE_PATH` — absolute paths to each CLI's executable (see
+     the comments in `host-bridge/.env.example` for how to find them on Windows).
+3. Build and start it: `pnpm --filter host-bridge build && pnpm --filter host-bridge start`
+   (run this as a persistent background process — a Windows Scheduled Task, `pm2`, or
+   equivalent; it needs to stay running alongside the Docker stack, not be a one-shot).
+4. Set `CLAUDE_BRIDGE_URL`, `CODEX_BRIDGE_URL` (both `http://host.docker.internal:4171`
+   if using the default port), and the same `HOST_BRIDGE_TOKEN` in the repo root `.env`,
+   then redeploy the backend (`docker compose ... up -d --build`) to pick them up.
+5. Confirm from inside the deployment: `GET /api/settings/providers` should report
+   `claude`/`openai` as `configured: true`.
+
+Leave all three env vars unset (the default) to run with Ollama only — nothing else
+changes.
+
+### Safety: tool-use is always disabled
+
+Both CLIs are coding agents that can run shell commands and edit files by default — the
+bridge always invokes them with tool-use disabled (`--tools ""` for claude, `--sandbox
+read-only` for codex) and a system-prompt preamble telling the model it has no tools, so
+a chat message can never trigger a real command/file-write on the host. See
+`host-bridge/src/prompt.ts`'s doc comment for what was actually verified by hand (the
+preamble is needed because the flags alone stop real tool execution but not the model
+*claiming* to have used one) and `docs/threat-model.md` for the residual risk.
+
 ## Known gaps (not covered by this runbook)
 
 - **Zero-downtime deploys**: `docker compose up -d --build` stops and
@@ -441,3 +490,7 @@ both initializers are small, isolated, and only wired in behind the
   both built images) but only reports findings in the Actions log/Security
   tab — it doesn't block a merge on vulnerabilities found, since deciding
   a severity threshold that fails CI is a policy call for the project owner.
+- **Claude/Codex via host-bridge has no real token-by-token streaming** — both CLIs'
+  non-interactive output modes return the full response at once, not incremental
+  deltas, so those two providers' chat UI shows the answer appearing all at once after
+  a short delay rather than streaming like Ollama does.

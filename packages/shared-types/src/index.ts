@@ -50,16 +50,22 @@ export interface CodeArtifactDto {
 
 export interface ProviderSettingDto {
   provider: AiProviderKey;
+  /**
+   * Always `false` now — claude/openai no longer take a per-user API key. Both are
+   * gated by a server-wide "host-bridge" that spawns the deployment host's
+   * already-logged-in claude/codex CLIs instead of calling Anthropic/OpenAI's APIs
+   * directly; see backend/src/provider-settings/provider-settings.service.ts.
+   */
   requiresApiKey: boolean;
+  /**
+   * Whether this provider is genuinely usable right now, checked live rather than
+   * read from stored config: Ollama's `/api/tags` for what's actually pulled on this
+   * machine, and the host-bridge's `/claude|codex/status` for whether that CLI is
+   * reachable and logged in.
+   */
   configured: boolean;
   updatedAt: string | null;
-  /**
-   * Static model catalog for the provider. Empty for ollama (locally
-   * configured, no fixed catalog — the user can run whatever they've
-   * pulled). Illustrative placeholder IDs for claude/openai; see
-   * backend/src/provider-settings/provider-settings.service.ts for the
-   * source of truth.
-   */
+  /** Only the models currently usable — empty whenever `configured` is `false`. */
   models: string[];
 }
 

@@ -77,11 +77,19 @@ describe('Cascade delete (e2e)', () => {
       },
     });
 
-    await request(app.getHttpServer())
-      .put('/api/settings/providers/openai')
-      .set('Authorization', `Bearer ${user.accessToken}`)
-      .send({ apiKey: 'cascade-test-secret' })
-      .expect(200);
+    // The BYOK REST endpoint that used to write this row is gone (claude/openai are
+    // now gated by the host-bridge, not a per-user key — see ProviderSettingsService),
+    // but the `provider_credentials` table and its cascade-delete relation are
+    // deliberately still in the schema (kept to avoid a migration, per plan.md Phase
+    // 10), so this inserts the row directly to keep exercising that cascade.
+    await prisma.providerCredential.create({
+      data: {
+        userId: user.user.id,
+        provider: 'openai',
+        encryptedApiKey: Buffer.from('cascade-test-secret'),
+        encryptionVersion: 1,
+      },
+    });
 
     const refreshTokenCount = await prisma.refreshToken.count({
       where: { userId: user.user.id },

@@ -255,22 +255,19 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       );
     }
 
-    // hasProvider() only confirms the provider class is registered; it says
-    // nothing about whether this user has configured a key for it. Resolve
-    // (and require) the key before creating any message rows.
-    let apiKey: string | undefined;
+    // hasProvider() only confirms the provider class is registered; it says nothing
+    // about whether claude/openai's host-bridge is reachable and logged in right now —
+    // checked before creating any message rows, same as the old per-user API-key check
+    // this replaced. Ollama is deliberately never checked here (same as before this
+    // check existed): if it's genuinely unreachable, OllamaProvider itself fails after
+    // message rows already exist, surfacing a clear per-message error instead of a
+    // blanket rejection — see chat.gateway.spec.ts's Ollama-unreachable coverage.
     if (providerKey !== 'ollama') {
-      const configuredKey =
-        await this.providerSettingsService.getApiKeyForRuntime(
-          userId,
-          providerKey,
-        );
-      if (!configuredKey) {
-        throw new WsException(
-          `Configure an API key for ${providerKey} before starting a session with it`,
-        );
+      const isAvailable =
+        await this.providerSettingsService.isProviderAvailable(providerKey);
+      if (!isAvailable) {
+        throw new WsException(`${providerKey} is not currently available`);
       }
-      apiKey = configuredKey;
     }
 
     const userMessage = await this.messagesService.createUserMessage(
@@ -409,7 +406,6 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       for await (const event of provider.streamChat({
         messages: aiMessages,
         model,
-        apiKey,
         abortSignal: controller.signal,
       })) {
         if (event.type === 'token') {

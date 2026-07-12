@@ -1,6 +1,5 @@
 import { HttpClient } from '@angular/common/http';
 import { Component, inject, signal } from '@angular/core';
-import { FormsModule } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
 import type { ProviderSettingDto } from '@app/shared-types';
 import { firstValueFrom } from 'rxjs';
@@ -9,16 +8,20 @@ import { PageHeaderComponent } from '../../design-system/page-header/page-header
 import { HairlineCardComponent } from '../../design-system/hairline-card/hairline-card.component';
 import { BadgePillComponent } from '../../design-system/badge-pill/badge-pill.component';
 import { AuthStore } from '../../core/auth.store';
-import { ToastService } from '../../core/toast.service';
 import { SessionListStore } from '../chat/session-list.store';
-import { ProviderCatalogStore } from '../chat/provider-catalog.store';
 
 const DEFAULT_OLLAMA_MODEL = 'qwen2.5-coder:14b';
 
+/**
+ * claude/openai no longer take a per-user API key (see backend
+ * ProviderSettingsService's doc comment) — both are gated by a server-wide
+ * "host-bridge" that spawns this server's already-logged-in claude/codex CLIs. This
+ * page is now read-only status display for all three providers, not a
+ * save/remove/test-key form.
+ */
 @Component({
   selector: 'app-provider-settings',
   imports: [
-    FormsModule,
     RouterLink,
     AppShellComponent,
     PageHeaderComponent,
@@ -33,14 +36,9 @@ export class ProviderSettingsComponent {
   private readonly router = inject(Router);
   protected readonly authStore = inject(AuthStore);
   private readonly sessionListStore = inject(SessionListStore);
-  private readonly providerCatalogStore = inject(ProviderCatalogStore);
-  private readonly toastService = inject(ToastService);
 
   readonly settings = signal<ProviderSettingDto[]>([]);
-  readonly apiKeys = signal<Record<string, string>>({});
   readonly loading = signal(true);
-  readonly savingProvider = signal<string | null>(null);
-  readonly testingProvider = signal<string | null>(null);
   readonly error = signal<string | null>(null);
 
   constructor() {
@@ -85,77 +83,6 @@ export class ProviderSettingsComponent {
       this.error.set('Could not load provider settings.');
     } finally {
       this.loading.set(false);
-    }
-  }
-
-  keyFor(provider: string): string {
-    return this.apiKeys()[provider] ?? '';
-  }
-
-  setKey(provider: string, value: string): void {
-    this.apiKeys.update((keys) => ({ ...keys, [provider]: value }));
-  }
-
-  async save(setting: ProviderSettingDto): Promise<void> {
-    const apiKey = this.keyFor(setting.provider).trim();
-    if (!apiKey) return;
-    this.savingProvider.set(setting.provider);
-    this.error.set(null);
-    try {
-      await firstValueFrom(
-        this.http.put(`/api/settings/providers/${setting.provider}`, { apiKey }),
-      );
-      this.setKey(setting.provider, '');
-      await this.load();
-      this.providerCatalogStore.reload();
-      this.toastService.show(`${setting.provider} key saved.`, 'success');
-    } catch {
-      this.error.set(`Could not save ${setting.provider} credentials.`);
-      this.toastService.show(`Could not save ${setting.provider} credentials.`, 'error');
-    } finally {
-      this.savingProvider.set(null);
-    }
-  }
-
-  async remove(setting: ProviderSettingDto): Promise<void> {
-    this.savingProvider.set(setting.provider);
-    this.error.set(null);
-    try {
-      await firstValueFrom(this.http.delete(`/api/settings/providers/${setting.provider}`));
-      await this.load();
-      this.providerCatalogStore.reload();
-      this.toastService.show(`${setting.provider} key removed.`, 'success');
-    } catch {
-      this.error.set(`Could not remove ${setting.provider} credentials.`);
-      this.toastService.show(`Could not remove ${setting.provider} credentials.`, 'error');
-    } finally {
-      this.savingProvider.set(null);
-    }
-  }
-
-  async testConnection(setting: ProviderSettingDto): Promise<void> {
-    this.testingProvider.set(setting.provider);
-    this.error.set(null);
-    try {
-      const result = await firstValueFrom(
-        this.http.post<{ success: boolean; message?: string }>(
-          `/api/settings/providers/${setting.provider}/test`,
-          {},
-        ),
-      );
-      if (result.success) {
-        this.toastService.show(`${setting.provider} connection verified.`, 'success');
-      } else {
-        const message = result.message ?? `Could not connect to ${setting.provider}.`;
-        this.error.set(message);
-        this.toastService.show(message, 'error');
-      }
-    } catch {
-      const message = `Could not test ${setting.provider} connection.`;
-      this.error.set(message);
-      this.toastService.show(message, 'error');
-    } finally {
-      this.testingProvider.set(null);
     }
   }
 }

@@ -6,7 +6,6 @@ import { App } from 'supertest/types';
 import type { Socket } from 'socket.io-client';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { MAX_CHAT_MESSAGE_BYTES } from '../src/chat/messages.service';
-import { ProviderSettingsService } from '../src/provider-settings/provider-settings.service';
 import {
   createE2eApp,
   listen,
@@ -368,11 +367,11 @@ describe('WebSocket / Socket.IO integration (e2e)', () => {
     });
   });
 
-  describe('provider runtime gating (claude/openai require a per-user configured key)', () => {
-    it('rejects chat:send for a provider the connected user has not configured a key for', async () => {
+  describe('provider runtime gating (claude/openai now require the host-bridge, not a per-user key)', () => {
+    it('rejects chat:send for claude/openai when the host-bridge is not configured, for every user alike (no per-user credential exists anymore)', async () => {
       const { user, session } = await registerAndSession(
         app,
-        'ws-provider-no-key',
+        'ws-provider-no-bridge',
       );
       createdUserIds.push(user.user.id);
 
@@ -381,12 +380,14 @@ describe('WebSocket / Socket.IO integration (e2e)', () => {
       socket.emit('session:join', { sessionId: session.id });
       await sleep(150);
 
-      // The session itself defaults to 'ollama' (which needs no key and so
-      // passes session creation's own gate — see ChatSessionsService.create()).
-      // This test targets the separate, second gate in ChatGateway.onChatSend
-      // that applies when a send explicitly asks for a different provider —
-      // exactly the path a user with no claude/openai key configured hits by
-      // switching providers mid-conversation via the frontend's model picker.
+      // The session itself defaults to 'ollama' (which passes session creation's
+      // own gate — see ChatSessionsService.create()). This test targets the
+      // separate, second gate in ChatGateway.onChatSend that applies when a send
+      // explicitly asks for a different provider. This e2e suite deliberately
+      // leaves CLAUDE_BRIDGE_URL/CODEX_BRIDGE_URL unset (see playwright/jest-e2e
+      // BACKEND_ENV), so claude/openai are never available here — exercising the
+      // exact same "bridge unreachable" path a real deployment hits if the
+      // host-bridge process isn't running.
       const exceptionPromise = waitForEvent<{
         status: string;
         message: string;
@@ -398,72 +399,12 @@ describe('WebSocket / Socket.IO integration (e2e)', () => {
       });
 
       const exception = await exceptionPromise;
-      expect(exception.message).toMatch(
-        /Configure an API key for claude before starting a session with it/,
-      );
+      expect(exception.message).toMatch(/claude is not currently available/);
 
       const messages = await prisma.message.findMany({
         where: { sessionId: session.id },
       });
       expect(messages).toHaveLength(0);
-    });
-
-    it("a key configured for one user is never usable by a different user's chat:send", async () => {
-      const FIXTURE_KEY = 'fixture-fake-claude-key-not-a-real-credential';
-      const { user: owner } = await registerAndSession(
-        app,
-        'ws-provider-key-owner',
-      );
-      createdUserIds.push(owner.user.id);
-      // A real encrypted credential row via the actual service (same
-      // encrypt/decrypt path production uses), not a real Anthropic key —
-      // this test never reaches the point of actually calling out to Claude,
-      // since the user under test (`other`, below) is rejected before that.
-      await app
-        .get(ProviderSettingsService)
-        .upsertApiKey(owner.user.id, 'claude', FIXTURE_KEY);
-
-      const { user: other, session: otherSession } = await registerAndSession(
-        app,
-        'ws-provider-key-other',
-      );
-      createdUserIds.push(other.user.id);
-
-      const socket = connect(other.accessToken);
-      await waitForEvent(socket, 'connect');
-      socket.emit('session:join', { sessionId: otherSession.id });
-      await sleep(150);
-
-      const exceptionPromise = waitForEvent<{
-        status: string;
-        message: string;
-      }>(socket, 'exception');
-      socket.emit('chat:send', {
-        sessionId: otherSession.id,
-        content: 'hello from a user with no key of their own',
-        provider: 'claude',
-      });
-
-      const exception = await exceptionPromise;
-      expect(exception.message).toMatch(
-        /Configure an API key for claude before starting a session with it/,
-      );
-      // The fixture key must never appear anywhere in what the client receives.
-      expect(JSON.stringify(exception)).not.toContain(FIXTURE_KEY);
-
-      const messages = await prisma.message.findMany({
-        where: { sessionId: otherSession.id },
-      });
-      expect(messages).toHaveLength(0);
-
-      // Confirms the fixture credential really was usable for its actual
-      // owner (the gate is per-user, not "nobody's key ever validates in
-      // tests") — checked via the existence-only hasApiKey(), not by
-      // actually decrypting/streaming, so this never touches the network.
-      const ownerHasKey = await app
-        .get(ProviderSettingsService)
-        .hasApiKey(owner.user.id, 'claude');
-      expect(ownerHasKey).toBe(true);
     });
   });
 

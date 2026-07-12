@@ -76,62 +76,7 @@
   text-transform: capitalize;
 }
 
-.provider-card__field {
-  display: grid;
-  gap: var(--space-1);
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--color-text-secondary);
-
-  input {
-    font-family: var(--font-body);
-    font-size: 14px;
-    padding: var(--space-2) var(--space-3);
-    border: 1px solid var(--color-hairline);
-    border-radius: var(--radius-sm);
-    color: var(--color-ink);
-    background: var(--color-canvas-raised);
-    box-sizing: border-box;
-    width: 100%;
-
-    &:focus {
-      outline: 2px solid var(--color-brand-yellow);
-      outline-offset: -1px;
-    }
-  }
-}
-
 .provider-card__note {
   color: var(--color-text-muted);
   font-size: 13px;
-}
-
-.provider-card__actions {
-  display: flex;
-  gap: var(--space-2);
-}
-
-.btn {
-  border: none;
-  border-radius: var(--radius-sm);
-  padding: var(--space-2) var(--space-4);
-  font-size: 13px;
-  font-weight: 700;
-  cursor: pointer;
-
-  &:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-}
-
-.btn--primary {
-  background: var(--color-ink);
-  color: var(--color-canvas-raised);
-}
-
-.btn--danger {
-  background: transparent;
-  color: var(--color-status-negative);
-  border: 1px solid var(--color-hairline);
 }

@@ -2,7 +2,7 @@
 
 เอกสารนี้สรุปสิ่งที่พัฒนาเสร็จแล้ว งานที่ยังต้องตรวจยืนยัน และงานที่ควรทำต่อ โดยอ้างอิงจาก source code ปัจจุบัน, Git history, Claude session เดิม, Docker task output และผล build/test ที่ตรวจล่าสุด
 
-อัปเดตสถานะล่าสุด: 12 กรกฎาคม 2026 (Asia/Bangkok) — Phase 0-9 ครบ `[x]` ทั้งหมดแล้ว (Phase 8's frontend build ค้างถูก deploy ไปพร้อมกับรอบ deploy ของ Phase 9)
+อัปเดตสถานะล่าสุด: 13 กรกฎาคม 2026 (Asia/Bangkok) — Phase 0-10 ครบ `[x]` ทั้งหมดแล้ว (Phase 10 ยังไม่ deploy ขึ้น production รอ user ยืนยัน)
 
 ## สัญลักษณ์สถานะ
 
@@ -27,6 +27,7 @@
 | Phase 7 | Security hardening และ production readiness | `[x]` | Helmet/CSP, CORS allowlist, rate limiting (REST+WS), audit log, structured logging, health checks, metrics, backup/restore, deployment hardening, file-based secrets, CI image scan, optional Sentry error reporting, license เสร็จหมด; manual test ทั้ง 2 รายการทำจริงแล้ว (server restart กลาง stream, migration rollback) — graceful-shutdown ยืนยันว่าทำงานถูกต้องจริงใน **prod** topology (`node dist/src/main.js` ตรง ๆ, ระหว่างทางเจอและแก้บั๊กจริง 2 จุด: prod image ไม่ set `NODE_ENV=production` default ทำให้ crash-loop, compose overlay ไม่ pin ทับ `.env`); dev-only gap เดียวกัน (signal ไม่ลงถึง Nest process ผ่าน `pnpm start:dev`/`nest --watch`) ไล่ root-cause ต่อจนสุดทางแล้วสรุปว่าไม่ใช่แค่ signal-forwarding อย่างที่คิดแรก แต่เป็นพฤติกรรมที่ลึกกว่านั้นใน dev runtime เอง — ตัดสินใจไม่ไล่ต่อเพราะ prod (topology จริงที่ deploy) ไม่มีปัญหานี้ และ data safety ฝั่ง dev ยังคุ้มครองผ่าน backstop เดิม; account lockout ตัดสินใจไม่ทำแล้ว (มีเหตุผลเต็มใน `docs/threat-model.md`) — ทั้งสองเป็น decision ที่ปิดแล้ว ไม่ใช่งานค้าง — ดูรายละเอียดเต็มใน Phase 7 → Reliability |
 | Phase 8 | Backoffice: Admin และ User management (Granular RBAC) + Guest role | `[x]` | Code เสร็จครบทั้ง backend (`admin` module, permission model, bootstrap service, `GuestBlockGuard`) และ frontend (3 หน้า backoffice + หน้า account-pending) พร้อม tests ผ่านหมด (backend unit 188/188, e2e **68/68**, frontend unit 45/45, Playwright browser e2e 6/6 จริงผ่าน browser จริงรวม `guest-activation.spec.ts`); ตรวจซ้ำอีกรอบแล้วพบ+แก้ครบ: บั๊ก stat-card icon ว่างบน dashboard (เจอจาก screenshot QA จริง), regression ใน Playwright suite (แก้แล้ว), gap "revoke permission มีผลทันที" ไม่มี test ตรง ๆ (เพิ่มแล้ว), ลบบัญชีทดสอบออกจาก production แล้ว; **deploy ขึ้น production จริงแล้วครบ 100%** (`chat.zextream.com`, migration applied, `ake.kidsapon@gmail.com` ยืนยันเป็น admin เต็มสิทธิ์บน production DB จริง, frontend build ล่าสุดที่มี stat-card icon fix ถูก deploy ไปพร้อมกับรอบ deploy ของ Phase 9 เมื่อ 12 กรกฎาคม 2026) — เพิ่ม backend+browser e2e เข้า CI (`.github/workflows/ci.yml`) ยังไม่ push ขึ้น remote — ดูรายละเอียดเต็มใน Phase 8 |
 | Phase 9 | Token usage tracking และ reporting | `[x]` | Backend (3 provider parse usage จริง + gateway + `MessagesService` + `AdminDashboardService` + shared-types) และ frontend (badge ต่อข้อความ + stat card/provider breakdown ใน backoffice) เสร็จครบ; unit 205/205, e2e 68/68, frontend unit 45/45 ผ่านหมด; ยืนยันจริงด้วย Ollama ทั้งระดับ API/DB และเบราว์เซอร์จริง (Playwright screenshot) ผ่าน isolated environment — commit แล้ว ยังไม่ deploy ขึ้น production ดูรายละเอียดเต็มใน Phase 9 |
+| Phase 10 | Model selection ที่ใช้งานได้จริง + Claude/Codex ผ่าน host-bridge แทน API key | `[x]` | Ollama model list เปลี่ยนจาก hardcode เป็น live query `/api/tags`; claude/openai เอา BYOK ออกทั้งหมด เปลี่ยนไปเรียก `claude.exe`/`codex.exe` ที่ login ไว้บนเครื่อง deploy เองผ่าน service ใหม่ `host-bridge/` (รันนอก Docker); backend unit 189/189, e2e 67/67, frontend unit 45/45, host-bridge unit 21/21 ผ่านหมด; ยืนยันจริงถึงขั้นเรียก `claude.exe`/`codex.exe` จริงผ่าน bridge จริงและได้ tokenCount บันทึกถูกต้อง — ระหว่างยืนยันเจอบั๊กจริง 1 จุดและแก้แล้ว (codex เขียนสถานะ login ลง stderr ไม่ใช่ stdout เวลาถูก spawn แบบ non-interactive) — ยังไม่ deploy ขึ้น production ดูรายละเอียดเต็มใน Phase 10 |
 
 ## สถานะ Repository
 
@@ -687,6 +688,76 @@ Role `admin` เป็นประตูแรก (gate การเข้าถ
 หลังยืนยันเสร็จ หยุด backend/`ng serve` ทิ้งขว้างทั้งคู่, ลบสคริปต์ Playwright ทิ้งขว้างออกจาก `e2e/`, `git status` สะอาด ไม่มีของทดสอบหลงเหลือ
 
 **สถานะ**: Code + tests เสร็จครบ, ยืนยันจริงกับ Ollama ทั้งระดับ API/DB (Node script) และระดับเบราว์เซอร์จริง (Playwright screenshot) แล้ว — commit แล้ว (3 commits: metrics/load-test leftover, deployment overlay, Phase 9 เอง) และ **deploy ขึ้น production จริงแล้ว** (`docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.cloudflare.yml -f docker-compose.deployment.yml up -d --build`, rebuild backend+frontend จาก source ล่าสุด, migrate job รันแล้วยืนยันว่าไม่มี migration ค้าง ตรงตามที่คาด, `/api/health/ready` และหน้าเว็บตอบ 200 หลัง deploy) — Phase 8's ค้าง "deploy frontend build ล่าสุด" ก็ถูกรวมไปในรอบ deploy นี้ด้วยเช่นกัน (ปิด gap นั้นไปพร้อมกัน); ยังไม่ได้ `git push` ขึ้น remote
+
+---
+
+## Phase 10 — Model selection ที่ใช้งานได้จริง + Claude/Codex ผ่าน host-bridge (`[x]` เสร็จแล้ว)
+
+ผู้ใช้ขอ 2 อย่าง: (1) เลือก model ในแชทได้ แสดงเฉพาะที่ "ใช้งานได้จริง" — Ollama ต้องเป็นรายการที่ pull ไว้จริงบนเครื่อง deploy เพราะรันบนเครื่องนี้ (2) Claude และ Codex (OpenAI) ให้ใช้ "user ที่ login ไว้บนเครื่องนี้" แทนระบบ BYOK (ให้ user แต่ละคนกรอก API key เอง) — งานนี้ผ่านการเข้า Plan Mode ก่อน implement ตาม pattern เดิมของ session นี้ เพราะมีการตัดสินใจสถาปัตยกรรมสำคัญหลายจุดที่ต้องยืนยันกับผู้ใช้ก่อน (ดูหัวข้อ "การตัดสินใจที่ยืนยันแล้ว" ด้านล่าง)
+
+### สิ่งที่ยืนยันจริงระหว่างวิจัย (ทดสอบเรียกจริง ไม่ใช่สมมติฐาน)
+
+- `claude.exe`/`codex.exe` เป็น Windows executable ที่รันบนเครื่อง host โดยตรง (`claude.exe` ที่ `AppData\Roaming\Claude\claude-code\<version>\`, `codex.exe` ที่ `AppData\Local\OpenAI\Codex\bin\<hash>\`) — login ไว้แล้วจริงทั้งคู่บนเครื่องนี้
+- Backend ที่ deploy จริงรันใน Docker container (Linux) เรียกไฟล์ `.exe` บน host ตรง ๆ ไม่ได้ → ต้องมี **`host-bridge/`** service ใหม่ทั้งหมด รันตรงบน host (ไม่ containerize) ให้ container เรียกผ่าน `host.docker.internal` เหมือน pattern เดิมที่ใช้กับ Ollama
+- การเรียกแบบ login เดิม (ไม่ใช่ `--bare`+API key) โหลด context เต็มรูปแบบของ agent harness ทุกครั้ง (~12,000–23,000 tokens, ทดสอบจริง 1 ข้อความสั้น ๆ ใช้ไป $0.017–0.053) — เป็น overhead ของตัว harness เอง (tool definitions/skills/system prompt) ไม่ใช่ CLAUDE.md ของ repo นี้ (ทดสอบจาก cwd กลางแล้วยังเจอ overhead นี้) — ผู้ใช้รับทราบและยอมรับแล้วเพราะเป็น subscription ไม่ใช่ pay-per-token จริง
+- `--bare` mode ของ claude ลด overhead ได้แต่บังคับ `ANTHROPIC_API_KEY` เท่านั้น ("OAuth and keychain are never read") ขัดกับเป้าหมายโดยตรง จึงใช้โหมดปกติ
+- **ไม่มี token-by-token streaming จริง** — ทั้ง `claude --output-format stream-json` และ `codex exec --json` ส่งข้อความเต็มก้อนเดียว ไม่ใช่ delta ทีละคำ → UI ของ claude/openai จะเห็นคำตอบ "โผล่มาทีเดียว" ต่างจาก Ollama ที่ stream จริง — บันทึกเป็น known limitation ใน `docs/deployment.md`
+- Default (ไม่ปิด tool) เปิด tool ครบชุดจริง (`Bash`, `Write`, `Edit`, ฯลฯ) — ยืนยันแล้วว่า `--tools ""` (claude) ปิดการ "รันจริง" ได้จริง (ทดสอบสั่งให้รัน `whoami` แล้วได้คำตอบที่**กุขึ้นมา** ไม่ใช่ output จริง ยืนยันว่าไม่มี tool ให้ใช้จริง) แต่โมเดลยังคง "เชื่อว่ามี tool" และกุคำตอบได้ถ้าไม่บอกมันตรง ๆ ว่าไม่มี tool — ต้องมี system-prompt preamble เพิ่มเพื่อกันการกุคำตอบ (`host-bridge/src/prompt.ts`)
+- **บั๊กจริงที่เจอระหว่างยืนยัน end-to-end**: `codex login status` เขียนผลลัพธ์ "Logged in using ChatGPT" ลง **stderr** ไม่ใช่ stdout เวลาถูก spawn แบบ non-interactive ผ่าน Node `child_process` (ตอนทดสอบด้วยมือผ่าน shell แล้วใช้ `2>&1` บังทำให้ไม่เห็นความต่าง) — ทำให้ `codexStatus()` เดิมอ่านแต่ stdout แล้วรายงาน `available: false` ผิดพลาดทั้งที่ login จริงอยู่ — แก้แล้วโดยเช็คทั้ง stdout+stderr รวมกัน (`host-bridge/src/codex.ts`)
+
+### การตัดสินใจที่ยืนยันกับผู้ใช้แล้ว (ผ่าน AskUserQuestion ระหว่าง Plan Mode)
+
+1. ยอมรับ cost/context overhead ของการใช้ login เดิม
+2. แก้ปัญหา Docker↔host ด้วย `host-bridge/` service ใหม่
+3. เอา BYOK ออกทั้งหมดสำหรับ claude/openai — provider key ในระบบยังคงชื่อ `claude`/`openai` เดิม (ไม่ rename เป็น `codex` ลด blast radius) แต่ implementation เปลี่ยนไปเรียก host-bridge แทน
+4. ปิด tool-use ทั้งหมดเสมอ (claude: `--tools ""`; codex: `--sandbox read-only` — เป็น floor ที่เข้มที่สุดที่ยืนยันได้ว่ามีจริง ยังไม่ยืนยันว่า "ปิด tool สนิท" เท่า claude บันทึกเป็น accepted risk ใน `docs/threat-model.md`)
+
+### ขอบเขตงานที่ทำจริง
+
+**Backend**:
+- `packages/shared-types`: `ProviderSettingDto.requiresApiKey` เป็น `false` เสมอตอนนี้; `configured`/`models` หมายถึง "ใช้งานได้จริงตอนนี้" ไม่ใช่ "มี key เก็บไว้"
+- `backend/src/provider-settings/provider-settings.service.ts`: เขียนใหม่ทั้งหมด — เอา `upsertApiKey`/`removeApiKey`/`testConnection`/`hasApiKey`/`getApiKeyForRuntime`/`ApiKeyEncryptionService` ออก, `list()` (เดิม `listForUser()`) query สดทุกครั้ง (มี cache 10 วิกันยิงถี่): ollama จาก `GET {OLLAMA_BASE_URL}/api/tags`, claude/openai จาก bridge's `/claude|codex/status`
+- `backend/src/provider-settings/provider-settings.controller.ts`: เหลือแค่ `GET /` — เอา `PUT`/`DELETE`/`POST .../test` ออกทั้งหมด (BYOK endpoints)
+- `backend/src/ai/providers/claude.provider.ts`, `openai.provider.ts`: เขียนใหม่ให้เรียก host-bridge ผ่าน `fetch` แทน Anthropic/OpenAI API ตรง ๆ — คง `AiProvider`/`AiStreamEvent` interface เดิมทุกอย่าง (ไม่กระทบ `ChatGateway`/`MessagesService`/Phase 9 token tracking เลย); เพิ่มไฟล์ใหม่ `host-bridge-client.ts` (parse NDJSON ที่ bridge ส่งกลับมา ซึ่งมีรูปร่างตรงกับ `AiStreamEvent` อยู่แล้ว ใช้ร่วมกันทั้งสอง provider)
+- `backend/src/realtime/chat.gateway.ts`, `backend/src/chat/chat-sessions.service.ts`: เปลี่ยนจากเช็ค per-user API key เป็นเช็ค `isProviderAvailable()` — **ตั้งใจคง ollama ไว้ไม่เช็คเลยทั้งสองจุด** (เหมือนพฤติกรรมเดิมก่อน BYOK แม้แต่ตอนที่ยังไม่มีฟีเจอร์นี้) เพราะ Ollama อาจสะดุดชั่วคราวโดยไม่ควรบล็อกการสร้าง session/ส่งข้อความไปเลย ปล่อยให้ error ที่ real send ตามปกติแทน — **เจอ regression จริงระหว่าง implement**: ตอนแรกเผลอเช็ค `isProviderAvailable('ollama')` ด้วย ทำให้ e2e suite ทั้งชุดพังยกแผง (34 tests) เพราะ e2e จงใจตั้งค่า Ollama unreachable แต่ยังต้องสร้าง session ได้ — แก้กลับให้ตรงพฤติกรรมเดิมแล้ว
+- `backend/src/config/env.validation.ts`: เพิ่ม `CLAUDE_BRIDGE_URL`/`CODEX_BRIDGE_URL`/`HOST_BRIDGE_TOKEN` (optional ทั้งหมด — deployment ที่ไม่ใช้ฟีเจอร์นี้ไม่ต้องตั้งอะไรเพิ่ม)
+- ลบไฟล์ที่ orphan แล้ว: `backend/src/provider-settings/dto/upsert-provider-credential.dto.ts`
+- `ProviderCredential` table **คงไว้ในสคีมา** (ไม่ migration ออก ลดความเสี่ยง) แต่ไม่มีอะไรเขียนเข้าไปอีกแล้ว
+
+**`host-bridge/` (workspace package ใหม่ทั้งหมด)**:
+- Express + TypeScript, รันตรงบน host ด้วย `pnpm --filter host-bridge build && pnpm --filter host-bridge start` — ไม่ containerize
+- ป้องกันด้วย shared-secret header (`x-bridge-token`, constant-time compare กัน timing attack)
+- `GET /claude/status` (`claude auth status`, ฟรีไม่มีคอสต์ — parse JSON `.loggedIn`), `GET /codex/status` (`codex login status`, เช็คทั้ง stdout+stderr ตามบั๊กที่เจอด้านบน)
+- `POST /claude/chat`, `POST /codex/chat` — flatten `messages[]` เป็น transcript เดียว (`Human: .../Assistant: ...`) ต่อท้าย safety preamble, spawn CLI ด้วย flag ปิด tool-use, parse ผลลัพธ์กลับเป็น NDJSON ตรงกับ `AiStreamEvent`
+- Token usage mapping: claude รวม `input_tokens + cache_creation_input_tokens + cache_read_input_tokens` เป็น inputTokens (ทั้งสามเป็น pool แยกกันจริงตาม Anthropic billing model); codex ใช้ `input_tokens` ตรง ๆ (cached เป็น subset ไม่ใช่ additive แบบ OpenAI) และรวม `reasoning_output_tokens` เข้า outputTokens
+- Unit tests 21/21 ผ่าน (mock `child_process`/`runProcess` ไม่เรียก CLI จริงในเทส)
+
+**Frontend**:
+- `provider-settings.component.ts/.html/.scss`: เอา input/save/remove/test-connection UI ออกทั้งหมดสำหรับ claude/openai เปลี่ยนเป็นแสดงสถานะอย่างเดียว (มี/ไม่มี CLI login พร้อมข้อความอธิบาย) — เหมือนกันทุก provider ตอนนี้ (ไม่มี `requiresApiKey` branch แยกแล้ว)
+- `new-session-dialog`/model selector เดิมไม่ต้องแก้ เพราะกรองด้วย `configuredProviders()` (จาก store) อยู่แล้ว จะซ่อน provider ที่ไม่พร้อมอัตโนมัติ
+
+**Docs**:
+- `docs/deployment.md`: เพิ่มหัวข้อ "Claude/Codex via host-bridge (optional)" เต็มรูปแบบ (setup steps, ทำไมต้องแยก process, safety notes) + known-gap ใหม่เรื่อง no streaming
+- `docs/threat-model.md`: เพิ่มหัวข้อ "Host-bridge command execution (claude/codex, optional feature)" เต็มรูปแบบ พร้อม accepted risks (codex sandbox floor ไม่ verify เท่า claude, single shared login ไม่ scale multi-tenant), อัปเดตข้อความเดิมที่เคยบอกว่า "ไม่มี tool-use ในแอปนี้เลย" ให้ระบุข้อยกเว้นนี้ตรง ๆ
+
+### ผลการยืนยันจริง (build/test/manual)
+
+- Backend unit: **189/189** ผ่าน (ลดจาก 205 เพราะลบ method/test ของ BYOK ออก ไม่ใช่ regression), e2e **67/67** ผ่าน (รวม 1 test ใหม่แทนที่ describe "provider runtime gating" เดิมที่ทดสอบ cross-user key isolation ซึ่งไม่มีความหมายอีกต่อไป), lint สะอาด, build สะอาด
+- Frontend unit **45/45** ผ่าน, build สะอาด
+- host-bridge unit **21/21** ผ่าน, type-check สะอาด
+- **Manual end-to-end ด้วย bridge จริง + CLI จริง** (isolated: throwaway Postgres เดิมที่ e2e suite ใช้, backend รันตรงด้วย `node dist/src/main.js`, host-bridge รันตรงด้วย `node dist/index.js` ทั้งคู่ไม่แตะ production เลย):
+  - `GET /api/settings/providers` คืนค่าถูกต้องครบสามตัว: ollama (`models: ["qwen2.5-coder:14b"]`), claude (`models: ["sonnet","opus","haiku"]`), openai (`models: ["gpt-5.6-sol"]`) — `configured: true` ทั้งสามตัวตอนที่ทุกอย่าง reachable จริง
+  - ส่งข้อความจริงผ่าน claude (`haiku`) และ codex (`gpt-5.6-sol`) ผ่าน socket จริงครบ pipeline (`ChatGateway` → provider → bridge → CLI จริง) ได้คำตอบ "PONG" ถูกต้องทั้งคู่, `tokenCount` บันทึกลง DB ถูกต้องตรงกับที่ client เห็น (claude: 6771, codex: 12780 — ตัวเลขสูงเพราะ harness overhead ตามที่บันทึกไว้ข้างบน)
+
+### เกณฑ์รับงาน
+
+- [x] Model selector แสดงเฉพาะ Ollama model ที่ pull ไว้จริงบนเครื่อง (ไม่ใช่ hardcode)
+- [x] Claude/Codex ใช้งานได้โดยไม่ต้องกรอก API key เมื่อ host-bridge รันอยู่และ CLI login ไว้
+- [x] Tool-use ปิดสนิทสำหรับ claude (ยืนยันด้วยมือ), ปิดผ่าน sandbox สำหรับ codex (accepted risk ที่ยังไม่ verify ครบ)
+- [x] ไม่มี regression กับ Ollama (แก้ regression ที่เจอระหว่าง implement แล้ว)
+- [x] Token usage tracking (Phase 9) ทำงานถูกต้องกับ provider ใหม่ทั้งสองตัวด้วย
+
+**สถานะ**: Code + tests เสร็จครบ, ยืนยันจริงกับ claude.exe/codex.exe ผ่าน host-bridge จริงแล้ว — ยังไม่ commit, ยังไม่ deploy ขึ้น production (ต้องมี host-bridge รันอยู่บนเครื่อง production จริงก่อนถึงจะเปิดใช้ claude/openai ได้ — ถ้า deploy โดยไม่ตั้งค่า `CLAUDE_BRIDGE_URL`/`CODEX_BRIDGE_URL`/`HOST_BRIDGE_TOKEN` ระบบจะทำงานปกติเหมือนเดิมแค่ claude/openai จะแสดงเป็น "ไม่พร้อมใช้งาน")
 
 ---
 

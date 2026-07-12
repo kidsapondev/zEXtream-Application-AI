@@ -35,7 +35,7 @@ export class ChatSessionsService {
   }
 
   async create(userId: string, dto: CreateSessionDto) {
-    await this.assertProviderConfigured(userId, dto.defaultProvider);
+    await this.assertProviderAvailable(dto.defaultProvider);
     return this.prisma.chatSession.create({
       data: {
         userId,
@@ -48,22 +48,22 @@ export class ChatSessionsService {
 
   /**
    * The DTO allowlist (ENABLED_PROVIDERS) only tells us the provider class is
-   * registered at runtime — it says nothing about whether *this user* has an
-   * API key for it. claude/openai both require one; ollama never does.
+   * registered at runtime. Ollama is deliberately never blocked here (same as
+   * before this check existed for claude/openai): a session should still be
+   * creatable even if Ollama has a momentary hiccup, with `chat:send` surfacing a
+   * clear per-message error if it's genuinely down when the user actually sends —
+   * see the equivalent skip in `ChatGateway.onChatSend`. claude/openai now check
+   * the host-bridge's live status instead of a per-user API key — see
+   * `ProviderSettingsService.isProviderAvailable`.
    */
-  private async assertProviderConfigured(
-    userId: string,
+  private async assertProviderAvailable(
     provider: AiProviderKey,
   ): Promise<void> {
     if (provider === 'ollama') return;
-    const hasKey = await this.providerSettingsService.hasApiKey(
-      userId,
-      provider,
-    );
-    if (!hasKey) {
-      throw new BadRequestException(
-        `Configure an API key for ${provider} before starting a session with it`,
-      );
+    const available =
+      await this.providerSettingsService.isProviderAvailable(provider);
+    if (!available) {
+      throw new BadRequestException(`${provider} is not currently available`);
     }
   }
 
@@ -88,8 +88,7 @@ export class ChatSessionsService {
     // when the user changes either part of its runtime selection, while still
     // allowing title/archive updates on historical sessions.
     if (dto.defaultProvider !== undefined || dto.defaultModel !== undefined) {
-      await this.assertProviderConfigured(
-        userId,
+      await this.assertProviderAvailable(
         dto.defaultProvider ?? session.defaultProvider,
       );
     }

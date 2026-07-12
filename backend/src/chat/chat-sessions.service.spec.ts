@@ -16,7 +16,7 @@ describe('ChatSessionsService', () => {
     stopAllForSession: jest.fn(),
   };
   const providerSettingsService = {
-    hasApiKey: jest.fn(),
+    isProviderAvailable: jest.fn(),
   };
 
   const service = new ChatSessionsService(
@@ -56,7 +56,8 @@ describe('ChatSessionsService', () => {
   });
 
   describe('create', () => {
-    it('creates an ollama session without checking for a configured key', async () => {
+    it('creates an ollama session without checking availability (a momentary Ollama hiccup must not block session creation)', async () => {
+      providerSettingsService.isProviderAvailable.mockResolvedValue(false);
       prisma.chatSession.create.mockResolvedValue({ id: 'session-1' });
 
       await service.create('user-1', {
@@ -64,34 +65,35 @@ describe('ChatSessionsService', () => {
         defaultModel: 'llama3',
       });
 
-      expect(providerSettingsService.hasApiKey).not.toHaveBeenCalled();
+      expect(
+        providerSettingsService.isProviderAvailable,
+      ).not.toHaveBeenCalled();
       expect(prisma.chatSession.create).toHaveBeenCalled();
     });
 
-    it('rejects creating a claude session when the user has no configured key', async () => {
-      providerSettingsService.hasApiKey.mockResolvedValue(false);
+    it('rejects creating a claude session when the host-bridge is not available', async () => {
+      providerSettingsService.isProviderAvailable.mockResolvedValue(false);
 
       await expect(
         service.create('user-1', {
           defaultProvider: 'claude',
-          defaultModel: 'claude-sonnet-5',
+          defaultModel: 'sonnet',
         }),
       ).rejects.toBeInstanceOf(BadRequestException);
 
-      expect(providerSettingsService.hasApiKey).toHaveBeenCalledWith(
-        'user-1',
+      expect(providerSettingsService.isProviderAvailable).toHaveBeenCalledWith(
         'claude',
       );
       expect(prisma.chatSession.create).not.toHaveBeenCalled();
     });
 
-    it('creates an openai session when the user has a configured key', async () => {
-      providerSettingsService.hasApiKey.mockResolvedValue(true);
+    it('creates an openai (codex) session when it is currently available', async () => {
+      providerSettingsService.isProviderAvailable.mockResolvedValue(true);
       prisma.chatSession.create.mockResolvedValue({ id: 'session-2' });
 
       await service.create('user-1', {
         defaultProvider: 'openai',
-        defaultModel: 'gpt-5.1',
+        defaultModel: 'gpt-5.6-sol',
       });
 
       expect(prisma.chatSession.create).toHaveBeenCalled();
@@ -121,46 +123,45 @@ describe('ChatSessionsService', () => {
   });
 
   describe('update', () => {
-    it('requires a currently configured key when changing a session provider', async () => {
+    it('requires the target provider to be currently available when changing a session provider', async () => {
       prisma.chatSession.findUnique.mockResolvedValue({
         id: 'session-1',
         userId: 'user-1',
         defaultProvider: 'ollama',
         defaultModel: 'llama3',
       });
-      providerSettingsService.hasApiKey.mockResolvedValue(false);
+      providerSettingsService.isProviderAvailable.mockResolvedValue(false);
 
       await expect(
         service.update('user-1', 'session-1', {
           defaultProvider: 'openai',
-          defaultModel: 'gpt-5.1',
+          defaultModel: 'gpt-5.6-sol',
         }),
       ).rejects.toBeInstanceOf(BadRequestException);
 
       expect(prisma.chatSession.update).not.toHaveBeenCalled();
     });
 
-    it('updates model-only changes after confirming the existing provider remains configured', async () => {
+    it('updates model-only changes after confirming the existing provider remains available', async () => {
       prisma.chatSession.findUnique.mockResolvedValue({
         id: 'session-1',
         userId: 'user-1',
         defaultProvider: 'claude',
-        defaultModel: 'claude-haiku-4-5',
+        defaultModel: 'haiku',
       });
-      providerSettingsService.hasApiKey.mockResolvedValue(true);
+      providerSettingsService.isProviderAvailable.mockResolvedValue(true);
       prisma.chatSession.update.mockResolvedValue({ id: 'session-1' });
 
       await service.update('user-1', 'session-1', {
-        defaultModel: 'claude-sonnet-5',
+        defaultModel: 'sonnet',
       });
 
-      expect(providerSettingsService.hasApiKey).toHaveBeenCalledWith(
-        'user-1',
+      expect(providerSettingsService.isProviderAvailable).toHaveBeenCalledWith(
         'claude',
       );
       expect(prisma.chatSession.update).toHaveBeenCalledWith({
         where: { id: 'session-1' },
-        data: { defaultModel: 'claude-sonnet-5' },
+        data: { defaultModel: 'sonnet' },
       });
     });
   });

@@ -56,9 +56,9 @@ describe('ProviderCatalogStore', () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     http.expectOne('/api/settings/providers').flush([
-      setting({ provider: 'ollama', requiresApiKey: false, configured: true }),
-      setting({ provider: 'claude', requiresApiKey: true, configured: true, models: ['claude-sonnet-5'] }),
-      setting({ provider: 'openai', requiresApiKey: true, configured: false, models: ['gpt-5.1'] }),
+      setting({ provider: 'ollama', configured: true }),
+      setting({ provider: 'claude', configured: true, models: ['sonnet'] }),
+      setting({ provider: 'openai', configured: false, models: ['gpt-5.6-sol'] }),
     ]);
     await TestBed.inject(ApplicationRef).whenStable();
 

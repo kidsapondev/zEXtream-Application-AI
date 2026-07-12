@@ -7,7 +7,7 @@
 >
   <div sidebar-list>
     <a class="nav-item nav-item--active" routerLink="/settings/providers">AI Providers</a>
-    <p class="hint">Manage the API keys used to talk to each AI provider.</p>
+    <p class="hint">Status of the AI providers available on this server.</p>
   </div>
 
   <div sidebar-footer>
@@ -18,7 +18,8 @@
   <div main>
     <ds-page-header title="AI providers">
       <span actions class="page-subtitle"
-        >Keys are encrypted before storage and are never shown again.</span
+        >Ollama runs on this server; Claude and Codex use this server's own logged-in
+        session — no API key needed.</span
       >
     </ds-page-header>
 
@@ -49,62 +50,25 @@
                   </svg>
                 </div>
                 <ds-badge-pill [status]="setting.configured ? 'positive' : 'neutral'">
-                  {{ setting.configured ? 'Configured' : 'Not configured' }}
+                  {{ setting.configured ? 'Available' : 'Not available' }}
                 </ds-badge-pill>
               </div>
 
               <h2 class="provider-card__name">{{ setting.provider }}</h2>
 
-              @if (setting.requiresApiKey) {
-                <label class="provider-card__field">
-                  <span>API key</span>
-                  <input
-                    type="password"
-                    autocomplete="off"
-                    placeholder="sk-…"
-                    [value]="keyFor(setting.provider)"
-                    (input)="setKey(setting.provider, $any($event.target).value)"
-                    [disabled]="savingProvider() === setting.provider"
-                  />
-                </label>
-                <div class="provider-card__actions">
-                  <button
-                    type="button"
-                    class="btn btn--primary"
-                    (click)="save(setting)"
-                    [disabled]="
-                      !keyFor(setting.provider).trim() || savingProvider() === setting.provider
-                    "
-                  >
-                    {{ savingProvider() === setting.provider ? 'Saving…' : 'Save key' }}
-                  </button>
-                  @if (setting.configured) {
-                    <button
-                      type="button"
-                      class="btn"
-                      (click)="testConnection(setting)"
-                      [disabled]="
-                        savingProvider() === setting.provider ||
-                        testingProvider() === setting.provider
-                      "
-                    >
-                      {{ testingProvider() === setting.provider ? 'Testing…' : 'Test connection' }}
-                    </button>
-                    <button
-                      type="button"
-                      class="btn btn--danger"
-                      (click)="remove(setting)"
-                      [disabled]="
-                        savingProvider() === setting.provider ||
-                        testingProvider() === setting.provider
-                      "
-                    >
-                      Remove key
-                    </button>
-                  }
-                </div>
+              @if (setting.provider === 'ollama') {
+                <p class="provider-card__note">
+                  Uses the Ollama service running on this machine.
+                  {{ setting.configured ? 'Reachable, showing pulled models.' : 'Unreachable right now.' }}
+                </p>
               } @else {
-                <p class="provider-card__note">Uses the locally configured Ollama service.</p>
+                <p class="provider-card__note">
+                  {{
+                    setting.configured
+                      ? "Uses this server's logged-in session — no API key needed."
+                      : "Not available — this server's CLI session isn't logged in right now."
+                  }}
+                </p>
               }
             </div>
           </ds-hairline-card>
