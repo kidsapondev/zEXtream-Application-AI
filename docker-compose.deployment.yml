@@ -1,0 +1,20 @@
+# Optional overlay: serve the frontend's static files from
+# D:\AI\Deployment\chat.zextream.com\ (bind mount) instead of the files baked
+# into the image at build time. This is what lets
+# D:\AI\Deployment-infra\deploy.ps1 push a new frontend build live instantly
+# (no image rebuild, no container restart, no downtime) for pure frontend
+# changes. Backend changes still need a real rebuild - deploy-web-ai.bat
+# (docker compose ... up -d --build) is unaffected by this overlay and
+# remains how backend/migrate/postgres get updated.
+#
+# The bind mount fully replaces whatever the image's own COPY put at
+# /usr/share/nginx/html - nginx.conf's `root /usr/share/nginx/html;` needs no
+# change, it just now reads from the host folder instead.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml \
+#     -f docker-compose.cloudflare.yml -f docker-compose.deployment.yml up -d
+services:
+  frontend:
+    volumes:
+      - D:\AI\Deployment\chat.zextream.com:/usr/share/nginx/html:ro
