@@ -107,6 +107,13 @@ export class ChatWorkspaceComponent {
     this.showNewSessionDialog.set(true);
   }
 
+  /** Wired to the composer's own "switch model" button (see chat-thread.component),
+   * which only knows a sessionId, not the full session record. */
+  onSwitchModelFromComposer(): void {
+    const session = this.currentSession();
+    if (session) this.onChangeSessionProvider(session);
+  }
+
   private async createSession(provider: AiProviderKey, model: string) {
     try {
       const session = await this.sessionListStore.createSession(provider, model);

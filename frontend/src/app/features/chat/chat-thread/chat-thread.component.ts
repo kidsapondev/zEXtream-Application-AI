@@ -5,6 +5,7 @@ import {
   effect,
   inject,
   input,
+  output,
   signal,
   viewChild,
 } from '@angular/core';
@@ -23,6 +24,12 @@ export class ChatThreadComponent {
   private static readonly STICK_TO_BOTTOM_THRESHOLD_PX = 96;
 
   readonly sessionId = input.required<string>();
+  /** Shown on the composer's model button — `undefined` while the session list is
+   * still loading, in which case the button renders without a label rather than
+   * blocking on it. */
+  readonly modelLabel = input<string | undefined>(undefined);
+  readonly switchModel = output<void>();
+
   protected readonly chatStore = inject(ChatStore);
   protected draft = signal('');
 

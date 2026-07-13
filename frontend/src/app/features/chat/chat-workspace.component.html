@@ -60,7 +60,11 @@
               </button>
             </div>
           }
-          <app-chat-thread [sessionId]="id" />
+          <app-chat-thread
+            [sessionId]="id"
+            [modelLabel]="currentSession()?.defaultModel"
+            (switchModel)="onSwitchModelFromComposer()"
+          />
         </div>
         @if (artifactStore.hasArtifacts()) {
           <div class="workspace-split__editor">

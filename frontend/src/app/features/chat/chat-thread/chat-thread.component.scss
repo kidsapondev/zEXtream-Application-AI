@@ -48,7 +48,11 @@
 }
 
 .message__bubble {
-  max-width: min(70ch, 100%);
+  // Wider than a typical ~70ch reading column on purpose — the chat page now fills
+  // the full viewport width (see chat-workspace.component.scss), and a narrow reading
+  // column there just left most of that width looking empty. Still capped (not 100%)
+  // so a line of text on an ultra-wide monitor doesn't get uncomfortably long to read.
+  max-width: min(900px, 90%);
   background: var(--color-canvas-raised);
   border: 1px solid var(--color-hairline);
   border-radius: var(--radius-md);
@@ -249,9 +253,50 @@
   }
 }
 
+// `.chat-thread__composer button` above is (class, element) = higher specificity than
+// a single class, so overriding it needs at least as much — scoped under the parent
+// class rather than just `.chat-thread__model-btn` alone, which silently lost every
+// property here to the generic solid-black button style (confirmed by hand: rendered
+// solid black, not this outline pill, until this selector was scoped like this).
+.chat-thread__composer .chat-thread__model-btn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  background: var(--color-canvas-raised);
+  color: var(--color-text-secondary);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-pill);
+  padding: 0 var(--space-3);
+  font-weight: 600;
+  font-size: 12px;
+
+  &:hover:not(:disabled) {
+    background: var(--color-ink);
+    border-color: var(--color-ink);
+    color: var(--color-canvas-raised);
+    opacity: 1;
+  }
+}
+
+.chat-thread__model-btn-label {
+  max-width: 14ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+
+  @media (max-width: 640px) {
+    display: none;
+  }
+}
+
 @media (max-width: 640px) {
   .chat-thread__composer button {
     padding: 0 var(--space-4);
+  }
+
+  .chat-thread__model-btn {
+    padding: 0 var(--space-3);
   }
 }
 
