@@ -43,13 +43,16 @@
   gap: var(--space-5);
   height: 100%;
   min-height: 0;
-  max-width: 80ch;
-  margin: 0 auto;
+  // Full width of whatever the shell gives this page — chat used to be capped
+  // to an 80ch reading column with everything else left blank on wide
+  // screens; individual message bubbles still cap their own width (see
+  // .message__bubble in chat-thread.component.scss) so text itself doesn't
+  // stretch edge to edge, this only widens the space they get to lay out in.
+  width: 100%;
 }
 
 .workspace-split--with-editor {
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  max-width: none;
 
   // Side-by-side chat/editor panes need more room than a tablet-width
   // viewport can give either one; stack them instead below that width.
@@ -119,11 +122,5 @@ app-chat-thread {
   &:focus-visible {
     outline: 2px solid var(--color-brand-yellow);
     outline-offset: 2px;
-  }
-}
-
-@media (max-width: 640px) {
-  .workspace-split {
-    max-width: none;
   }
 }
