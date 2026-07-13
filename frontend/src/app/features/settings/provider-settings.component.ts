@@ -10,8 +10,6 @@ import { BadgePillComponent } from '../../design-system/badge-pill/badge-pill.co
 import { AuthStore } from '../../core/auth.store';
 import { SessionListStore } from '../chat/session-list.store';
 
-const DEFAULT_OLLAMA_MODEL = 'qwen2.5-coder:14b';
-
 /**
  * claude/openai no longer take a per-user API key (see backend
  * ProviderSettingsService's doc comment) — both are gated by a server-wide
@@ -53,9 +51,10 @@ export class ProviderSettingsComponent {
    * dialog is available instead of guessing a provider here.
    */
   async onNewChat() {
-    const configuredCount = this.settings().filter((s) => s.configured).length;
-    if (configuredCount <= 1) {
-      const session = await this.sessionListStore.createSession('ollama', DEFAULT_OLLAMA_MODEL);
+    const configured = this.settings().filter((s) => s.configured);
+    if (configured.length === 1) {
+      const [only] = configured;
+      const session = await this.sessionListStore.createSession(only.provider, only.models[0]);
       await this.router.navigate(['/chat', session.id]);
       return;
     }

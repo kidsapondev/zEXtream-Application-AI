@@ -8,10 +8,10 @@ import { HairlineCardComponent } from '../../../design-system/hairline-card/hair
 import { BadgePillComponent } from '../../../design-system/badge-pill/badge-pill.component';
 import { AuthStore } from '../../../core/auth.store';
 import { SessionListStore } from '../../chat/session-list.store';
+import { ProviderCatalogStore } from '../../chat/provider-catalog.store';
+import { ToastService } from '../../../core/toast.service';
 import { AdminStore } from '../admin.store';
 import { AdminNavComponent } from '../admin-nav/admin-nav.component';
-
-const DEFAULT_OLLAMA_MODEL = 'qwen2.5-coder:14b';
 
 @Component({
   selector: 'app-admin-dashboard',
@@ -32,6 +32,8 @@ export class AdminDashboardComponent {
   protected readonly router = inject(Router);
   protected readonly authStore = inject(AuthStore);
   private readonly sessionListStore = inject(SessionListStore);
+  private readonly providerCatalogStore = inject(ProviderCatalogStore);
+  private readonly toastService = inject(ToastService);
   protected readonly adminStore = inject(AdminStore);
 
   protected readonly canView = computed(() =>
@@ -50,9 +52,14 @@ export class AdminDashboardComponent {
   });
 
   async onNewChat(): Promise<void> {
+    const [provider] = this.providerCatalogStore.configuredProviders();
+    if (!provider) {
+      this.toastService.show('No AI provider is currently available.', 'error');
+      return;
+    }
     const session = await this.sessionListStore.createSession(
-      'ollama',
-      DEFAULT_OLLAMA_MODEL,
+      provider.provider,
+      provider.models[0],
     );
     await this.router.navigate(['/chat', session.id]);
   }

@@ -14,8 +14,6 @@ import { NewSessionDialogComponent } from './new-session-dialog/new-session-dial
 import { ArtifactStore } from '../code-editor/artifact.store';
 import { CodeEditorPanelComponent } from '../code-editor/code-editor-panel.component';
 
-const DEFAULT_OLLAMA_MODEL = 'qwen2.5-coder:14b';
-
 @Component({
   selector: 'app-chat-workspace',
   imports: [
@@ -50,16 +48,21 @@ export class ChatWorkspaceComponent {
   }
 
   /**
-   * Ollama (no key required) is always "configured", so if it's the only
-   * configured provider there is no real choice to make — skip the dialog
-   * and create the session immediately to keep "+" a single click for the
-   * common case. Once the user has configured Claude and/or OpenAI, "+"
-   * opens the picker so they can choose.
+   * If exactly one provider is currently usable, there's no real choice to
+   * make — skip the dialog and create the session immediately (with that
+   * provider's first live model, e.g. Ollama's `models` from `/api/tags`)
+   * to keep "+" a single click for the common case. Once more than one
+   * provider is available, "+" opens the picker so the user can choose.
    */
   async onNewChat() {
     const configured = this.providerCatalogStore.configuredProviders();
-    if (configured.length <= 1) {
-      await this.createSession('ollama', DEFAULT_OLLAMA_MODEL);
+    if (configured.length === 0) {
+      this.toastService.show('No AI provider is currently available.', 'error');
+      return;
+    }
+    if (configured.length === 1) {
+      const [only] = configured;
+      await this.createSession(only.provider, only.models[0]);
       return;
     }
     this.showNewSessionDialog.set(true);

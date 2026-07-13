@@ -23,28 +23,7 @@
         />
       </div>
 
-      @if (selectedProvider() === 'ollama') {
-        <div class="new-session-dialog__field">
-          <span class="new-session-dialog__label">Model</span>
-          <input
-            type="text"
-            class="new-session-dialog__input"
-            list="ollama-model-suggestions"
-            placeholder="e.g. qwen2.5-coder:14b"
-            autocomplete="off"
-            [ngModel]="customOllamaModel()"
-            (ngModelChange)="customOllamaModel.set($event)"
-          />
-          <datalist id="ollama-model-suggestions">
-            @for (model of commonOllamaModels; track model) {
-              <option [value]="model"></option>
-            }
-          </datalist>
-          <p class="new-session-dialog__hint">
-            Any model already pulled in your local Ollama install works — type its name.
-          </p>
-        </div>
-      } @else if (modelOptions().length > 0) {
+      @if (modelOptions().length > 0) {
         <div class="new-session-dialog__field">
           <span class="new-session-dialog__label">Model</span>
           <ds-segmented-tabs
@@ -52,6 +31,9 @@
             [selected]="selectedModel()"
             (selectedChange)="selectedModel.set($event)"
           />
+          @if (selectedProvider() === 'ollama') {
+            <p class="new-session-dialog__hint">Models currently pulled on this server.</p>
+          }
         </div>
       }
 

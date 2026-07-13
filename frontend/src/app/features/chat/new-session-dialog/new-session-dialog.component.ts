@@ -16,21 +16,16 @@ import {
   type SegmentedTabOption,
 } from '../../../design-system/segmented-tabs/segmented-tabs.component';
 
-/** A handful of common local model names, offered only as convenience suggestions — Ollama has no fixed catalog, so free text is always allowed. */
-const COMMON_OLLAMA_MODELS = [
-  'qwen2.5-coder:14b',
-  'qwen2.5-coder:7b',
-  'llama3.1:8b',
-  'deepseek-coder-v2:16b',
-  'mistral:7b',
-];
-
-const DEFAULT_OLLAMA_MODEL = 'qwen2.5-coder:14b';
-
 /**
  * Provider + model picker shown when starting a new chat (and reused, in
  * principle, wherever a provider/model choice is needed — see
  * `chat-workspace.component.ts` for the one current call site).
+ *
+ * Every provider's model list — including Ollama's — comes from `providers()`
+ * (`GET /api/settings/providers`, backed by a live check: Ollama's `/api/tags`,
+ * claude/openai's host-bridge status — see `ProviderSettingsService`), so this
+ * only ever offers models that are genuinely usable right now, never a
+ * hardcoded guess.
  *
  * Deliberately a bespoke dialog rather than a reuse of `ds-confirm-dialog`:
  * that component's contract is a yes/no question with two buttons, not a
@@ -55,11 +50,8 @@ export class NewSessionDialogComponent {
   readonly created = output<{ provider: AiProviderKey; model: string }>();
   readonly cancelled = output<void>();
 
-  protected readonly commonOllamaModels = COMMON_OLLAMA_MODELS;
-
   protected readonly selectedProvider = signal<AiProviderKey>('ollama');
   protected readonly selectedModel = signal('');
-  protected readonly customOllamaModel = signal(DEFAULT_OLLAMA_MODEL);
 
   protected readonly providerOptions = computed<SegmentedTabOption[]>(() =>
     this.providers().map((p) => ({ value: p.provider, label: providerLabel(p.provider) })),
@@ -73,11 +65,7 @@ export class NewSessionDialogComponent {
     (this.currentProviderSetting()?.models ?? []).map((model) => ({ value: model, label: model })),
   );
 
-  protected readonly effectiveModel = computed(() =>
-    this.selectedProvider() === 'ollama' ? this.customOllamaModel().trim() : this.selectedModel(),
-  );
-
-  protected readonly canCreate = computed(() => this.effectiveModel().length > 0);
+  protected readonly canCreate = computed(() => this.selectedModel().length > 0);
 
   private readonly dialogEl = viewChild<ElementRef<HTMLDivElement>>('dialogEl');
 
@@ -94,11 +82,6 @@ export class NewSessionDialogComponent {
         providers[0];
       if (!preferred) return;
       this.selectedProvider.set(preferred.provider);
-      this.customOllamaModel.set(
-        preferred.provider === 'ollama'
-          ? (initial?.model ?? DEFAULT_OLLAMA_MODEL)
-          : DEFAULT_OLLAMA_MODEL,
-      );
       this.selectedModel.set(
         preferred.models.includes(initial?.model ?? '')
           ? (initial?.model ?? '')
@@ -106,10 +89,10 @@ export class NewSessionDialogComponent {
       );
     });
 
-    // Keep the model selection valid whenever the provider changes.
+    // Keep the model selection valid whenever the provider (or its live model list) changes.
     effect(() => {
       const setting = this.currentProviderSetting();
-      if (!setting || setting.provider === 'ollama') return;
+      if (!setting) return;
       if (!setting.models.includes(this.selectedModel())) {
         this.selectedModel.set(setting.models[0] ?? '');
       }
@@ -126,7 +109,7 @@ export class NewSessionDialogComponent {
 
   protected confirm(): void {
     if (!this.canCreate()) return;
-    this.created.emit({ provider: this.selectedProvider(), model: this.effectiveModel() });
+    this.created.emit({ provider: this.selectedProvider(), model: this.selectedModel() });
   }
 }
 

@@ -41,26 +41,26 @@ describe('NewSessionDialogComponent', () => {
     TestBed.configureTestingModule({ imports: [HostComponent] });
   });
 
-  it('defaults to Ollama with the fallback model when Ollama is among the configured providers', () => {
+  it('defaults to Ollama, picking the first entry of its live model list', () => {
     const fixture = TestBed.createComponent(HostComponent);
     fixture.componentInstance.providers.set([
-      setting({ provider: 'ollama' }),
-      setting({ provider: 'claude', requiresApiKey: true, models: ['claude-sonnet-5'] }),
+      setting({ provider: 'ollama', models: ['qwen2.5-coder:14b', 'llama3'] }),
+      setting({ provider: 'claude', models: ['sonnet'] }),
     ]);
     fixture.detectChanges();
 
     const dialog = fixture.debugElement.query((d) => d.name === 'app-new-session-dialog')
       .componentInstance as NewSessionDialogComponent;
     expect(dialog['selectedProvider']()).toBe('ollama');
-    expect(dialog['effectiveModel']()).toBe('qwen2.5-coder:14b');
+    expect(dialog['selectedModel']()).toBe('qwen2.5-coder:14b');
     expect(dialog['canCreate']()).toBe(true);
   });
 
   it('emits the selected provider and model on confirm', () => {
     const fixture = TestBed.createComponent(HostComponent);
     fixture.componentInstance.providers.set([
-      setting({ provider: 'ollama' }),
-      setting({ provider: 'claude', requiresApiKey: true, models: ['claude-sonnet-5', 'claude-haiku-4-5'] }),
+      setting({ provider: 'ollama', models: ['qwen2.5-coder:14b'] }),
+      setting({ provider: 'claude', models: ['sonnet', 'haiku'] }),
     ]);
     fixture.detectChanges();
 
@@ -68,25 +68,40 @@ describe('NewSessionDialogComponent', () => {
       .componentInstance as NewSessionDialogComponent;
     dialog['onProviderChange']('claude');
     fixture.detectChanges();
-    expect(dialog['selectedModel']()).toBe('claude-sonnet-5');
+    expect(dialog['selectedModel']()).toBe('sonnet');
 
     dialog['confirm']();
 
-    expect(fixture.componentInstance.created).toEqual({ provider: 'claude', model: 'claude-sonnet-5' });
+    expect(fixture.componentInstance.created).toEqual({ provider: 'claude', model: 'sonnet' });
   });
 
-  it('disallows creating with a blank Ollama model and emits cancelled on request', () => {
+  it('disallows creating when the selected provider has no live models, and emits cancelled on request', () => {
     const fixture = TestBed.createComponent(HostComponent);
-    fixture.componentInstance.providers.set([setting({ provider: 'ollama' })]);
+    fixture.componentInstance.providers.set([setting({ provider: 'ollama', models: [] })]);
     fixture.detectChanges();
 
     const dialog = fixture.debugElement.query((d) => d.name === 'app-new-session-dialog')
       .componentInstance as NewSessionDialogComponent;
-    dialog['customOllamaModel'].set('   ');
-    fixture.detectChanges();
+    expect(dialog['selectedModel']()).toBe('');
     expect(dialog['canCreate']()).toBe(false);
 
     dialog.cancelled.emit();
     expect(fixture.componentInstance.cancelledCount).toBe(1);
+  });
+
+  it('switches the selected model to the new provider’s first live model when the provider changes', () => {
+    const fixture = TestBed.createComponent(HostComponent);
+    fixture.componentInstance.providers.set([
+      setting({ provider: 'ollama', models: ['qwen2.5-coder:14b'] }),
+      setting({ provider: 'openai', models: ['gpt-5.6-sol'] }),
+    ]);
+    fixture.detectChanges();
+
+    const dialog = fixture.debugElement.query((d) => d.name === 'app-new-session-dialog')
+      .componentInstance as NewSessionDialogComponent;
+    dialog['onProviderChange']('openai');
+    fixture.detectChanges();
+
+    expect(dialog['selectedModel']()).toBe('gpt-5.6-sol');
   });
 });
