@@ -1,4 +1,4 @@
-import { Component, effect, inject, input, signal } from '@angular/core';
+import { Component, computed, effect, inject, input, signal } from '@angular/core';
 import { HttpErrorResponse } from '@angular/common/http';
 import { Router } from '@angular/router';
 import type { AiProviderKey, ChatSessionDto } from '@app/shared-types';
@@ -39,6 +39,12 @@ export class ChatWorkspaceComponent {
 
   protected readonly showNewSessionDialog = signal(false);
   protected readonly sessionBeingReconfigured = signal<ChatSessionDto | null>(null);
+
+  /** The full session record for the currently open chat — used to show its
+   * provider/model in the chat header and to seed the "switch model" dialog. */
+  protected readonly currentSession = computed(() =>
+    this.sessionListStore.sessions().find((s) => s.id === this.sessionId()),
+  );
 
   constructor() {
     effect(() => {
@@ -130,5 +136,16 @@ export class ChatWorkspaceComponent {
   async onLogout() {
     await this.authStore.logout();
     await this.router.navigateByUrl('/login');
+  }
+
+  protected providerLabel(provider: AiProviderKey): string {
+    switch (provider) {
+      case 'ollama':
+        return 'Ollama';
+      case 'claude':
+        return 'Claude';
+      case 'openai':
+        return 'OpenAI';
+    }
   }
 }

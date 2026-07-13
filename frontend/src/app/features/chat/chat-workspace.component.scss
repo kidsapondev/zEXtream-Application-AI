@@ -65,6 +65,63 @@
   height: 100%;
 }
 
+.workspace-split__chat {
+  display: flex;
+  flex-direction: column;
+}
+
+// app-chat-thread's own root already stretches to fill 100% of whatever height
+// it's given (see chat-thread.component.scss) — here it just needs to be the
+// flexible sibling below the fixed-height header, not the whole column.
+app-chat-thread {
+  flex: 1;
+  min-height: 0;
+}
+
+.chat-session-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-shrink: 0;
+  padding-bottom: var(--space-3);
+  margin-bottom: var(--space-3);
+  border-bottom: 1px solid var(--color-hairline);
+}
+
+.chat-session-header__model {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  text-transform: capitalize;
+}
+
+.chat-session-header__switch {
+  border: 1px solid var(--color-hairline);
+  background: var(--color-canvas-raised);
+  color: var(--color-text-secondary);
+  border-radius: var(--radius-pill);
+  padding: var(--space-1) var(--space-3);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease,
+    border-color 0.15s ease;
+
+  &:hover {
+    background: var(--color-ink);
+    border-color: var(--color-ink);
+    color: var(--color-canvas-raised);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--color-brand-yellow);
+    outline-offset: 2px;
+  }
+}
+
 @media (max-width: 640px) {
   .workspace-split {
     max-width: none;

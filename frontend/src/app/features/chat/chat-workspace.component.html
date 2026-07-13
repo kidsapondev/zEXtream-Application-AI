@@ -46,6 +46,20 @@
         [class.workspace-split--with-editor]="artifactStore.hasArtifacts()"
       >
         <div class="workspace-split__chat">
+          @if (currentSession(); as session) {
+            <div class="chat-session-header">
+              <span class="chat-session-header__model">
+                {{ providerLabel(session.defaultProvider) }} · {{ session.defaultModel }}
+              </span>
+              <button
+                type="button"
+                class="chat-session-header__switch"
+                (click)="onChangeSessionProvider(session)"
+              >
+                Switch model
+              </button>
+            </div>
+          }
           <app-chat-thread [sessionId]="id" />
         </div>
         @if (artifactStore.hasArtifacts()) {
