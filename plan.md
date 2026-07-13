@@ -766,6 +766,56 @@ Role `admin` เป็นประตูแรก (gate การเข้าถ
 
 ---
 
+## Phase 11 — Chat memory: จำข้อเท็จจริงเกี่ยวกับผู้ใช้ข้ามบทสนทนา (`[x]` เสร็จแล้ว)
+
+ผู้ใช้ขอให้ระบบแชท "เรียนรู้ไปด้วย" ระหว่างคุย พร้อมกับอีก 3 ฟีเจอร์ (แนบรูป/gen รูป/export Word-Excel) ที่ขอให้ "ออกแบบ" ไว้ก่อนใน Plan Mode เป็น roadmap 4 phase (11–14) — งานนี้คือ Phase 11 เพียง phase เดียว ตามที่ตกลงกันว่าจะ implement ทีละ phase ไม่ทำพร้อมกันทั้งหมด (ดู plan file ที่บันทึกการออกแบบทั้ง 4 phase ไว้ตอน ExitPlanMode)
+
+### แนวทางที่เลือก (เทียบ 3 ทางเลือกจากงานวิจัยก่อน implement)
+
+เทียบ (ก) rolling summary ใส่ system prompt, (ข) ตาราง "memory notes" ต่อ user พร้อม structured extraction, (ค) full RAG ด้วย pgvector — เลือก **(ข)** เป็น v1: คุณภาพดีกว่า (ก) มากโดยไม่ต้องแบก infra ของ (ค) ที่ scale นี้ยังไม่จำเป็น และเป็นฐานข้อมูลตั้งต้นที่ upgrade เป็น pgvector ได้ในอนาคตถ้าจำนวนโน้ตเยอะขึ้นจนต้อง top-K retrieval แทน "ใส่ทั้งหมด"
+
+### สิ่งที่ยืนยันจริงระหว่าง implement (ทดสอบเรียกจริงกับ Ollama บนเครื่องนี้ ไม่ใช่สมมติฐาน)
+
+- **ขอ JSON array เปล่า ๆ ไม่น่าเชื่อถือในทางปฏิบัติ**: ทดสอบสั่ง `qwen2.5-coder:14b` ผ่าน `/api/generate` (`format: "json"`) ให้ตอบเป็น JSON array ของ fact ตรง ๆ แต่โมเดลกลับตอบเป็น object ที่คิด key เอง (เช่น `{"name":"user","location":"Bangkok","UI_preference":"dark_mode"}`) แทนที่จะเป็น array — `format: 'json'` การันตีแค่ syntactically valid JSON ไม่ได้การันตี shape ตามที่ขอ แก้โดยเปลี่ยน prompt ให้ขอ object ที่มี key ชื่อ `facts` แทน (`{"facts": [...]}`) ซึ่งเป็นเทคนิคที่รู้กันว่าโมเดล structured-output ทำตามได้ดีกว่าการขอ array เปล่า ๆ ตรง ๆ — ทดสอบซ้ำแล้วได้ shape ที่ถูกต้องทันที (`{"facts": ["Lives in Bangkok", "Prefers dark mode"]}`)
+- `parseFacts()` ยังคง fallback รองรับทั้ง bare array (เผื่อโมเดลอื่นทำตาม) และ flat-object เดิม (เผื่อโมเดลเผลอกลับไปตอบแบบเดิม) แทนที่จะทิ้งผลลัพธ์ที่สกัดมาได้ถูกต้องจริงเพียงเพราะ wrapper shape ผิด
+- **บั๊กจริงที่เจอระหว่างยืนยัน manual end-to-end**: รอบแรกที่ทดสอบส่งข้อความจริงแล้ว poll `/api/settings/memory` นาน 30 วิ ไม่เจอโน้ตเลยสักตัว — สาเหตุคือ `dist/` ที่ build ไว้ก่อนหน้าเป็น build เก่าตั้งแต่ก่อนแก้ prompt/parser ข้างบน (ลืม build ใหม่หลังแก้โค้ด) ไม่ใช่บั๊กใน logic จริง — เพิ่ม debug log ชั่วคราว, build ใหม่, ทดสอบซ้ำแล้วทำงานถูกต้องทันที (เอา debug log ออกก่อน commit)
+
+### ขอบเขตงานที่ทำจริง
+
+**Backend**:
+- `backend/prisma/schema.prisma`: model ใหม่ `UserMemoryNote { id, userId, content, sourceSessionId?, createdAt, updatedAt }` + relation จาก `User.memoryNotes` — migration `20260713070524_add_user_memory_notes`
+- `backend/src/memory/` (module ใหม่ทั้งหมด): `memory.service.ts` (`list`/`remove`/`removeAll`/`notesForPrompt`/`extractFromExchange`), `memory.controller.ts` (`GET|DELETE /api/settings/memory`, `DELETE /api/settings/memory/:id`), `memory.module.ts`
+- `backend/src/realtime/chat.gateway.ts`: หลัง `finalizeAssistantMessage` ยิง `memoryService.extractFromExchange(...)` แบบ **fire-and-forget** (ไม่ await, ไม่ block การตอบ user) เฉพาะตอน `finalStatus === 'complete'` และมีเนื้อหาจริง — เสมอผ่าน **Ollama เท่านั้น** ไม่ว่าผู้ใช้จะคุยกับ provider ไหนอยู่ (เป็น background task ราคาถูก/เร็วที่สุด); ตอนสร้าง `aiMessages` ดึง `notesForPrompt(userId)` มาต่อเป็น system message เพิ่ม (ข้ามถ้าไม่มีโน้ตเลย)
+- Cap: `MAX_MEMORY_NOTE_BYTES` (2KB/โน้ต), `MAX_MEMORY_NOTES_PER_USER` (200 — ตัวเก่าสุดถูก evict เมื่อเกิน), `MEMORY_NOTES_INJECTED` (30 โน้ตล่าสุดที่ inject เข้า system prompt), `MAX_FACTS_PER_EXTRACTION` (10 fact/ครั้ง) — dedupe แบบ exact-match ไม่สนตัวพิมพ์เล็ก-ใหญ่ (ยังไม่ทำ semantic dedupe)
+- `backend/src/config/env.validation.ts`: เพิ่ม `MEMORY_EXTRACTION_MODEL` (optional — ไม่ตั้งค่า = ปิดฟีเจอร์ทั้งหมดแบบ graceful ไม่ error)
+- Failure mode: Ollama ล่ม/timeout ระหว่าง extraction ถูก catch ภายใน `extractFromExchange` เอง ไม่มีทางกระทบ response หลักที่ client เห็นไปแล้ว
+
+**Frontend**:
+- `packages/shared-types`: `MemoryNoteDto`
+- `frontend/src/app/features/settings/memory/` (ใหม่): `memory-settings.component.ts/.html/.scss` — list โน้ต + ลบทีละอัน/ลบทั้งหมด (reuse `ds-confirm-dialog` เดิม) เป็นหน้า transparency/control ให้ผู้ใช้เห็น/ลบสิ่งที่ระบบจำไว้ได้เอง
+- Route `/settings/memory` ใหม่ + nav link ไขว้กับ `/settings/providers`
+
+### ผลการยืนยันจริง (build/test/manual)
+
+- Backend unit: **211/211** ผ่าน (189 เดิม + 15 `memory.service.spec.ts` + 5 gateway-wiring + 2 เพิ่มทีหลังสำหรับ JSON-shape fallback), e2e **72/72** ผ่าน (เพิ่ม `memory-settings.e2e-spec.ts` 5 tests — ownership ของ list/delete/delete-all), build (`nest build`) สะอาด, `tsc --noEmit` ไม่มี error ใหม่จากไฟล์ที่แก้ (error ที่เหลืออยู่เป็นของเดิมในไฟล์ที่ไม่ได้แตะ)
+- Frontend unit **50/50** ผ่าน (46 เดิม + 4 `memory-settings.component.spec.ts`), production build สะอาด (เห็น `memory-settings-component` เป็น lazy chunk แยกต่างหากจริง)
+- **Manual end-to-end กับ Ollama จริงบนเครื่องนี้** (isolated: throwaway Postgres เดิมที่ e2e suite ใช้ port 5455, backend รันตรงด้วย `node dist/src/main.js`, ไม่แตะ production เลย):
+  - ส่งข้อความจริงบอกชื่อ/เมือง/ความชอบ ผ่าน socket จริงครบ pipeline → extraction ทำงานถูกต้อง สร้างโน้ต 3 รายการใน DB (`Name is Kidsapon`, `Lives in Bangkok`, `Prefers dark mode UIs`)
+  - เปิด **session ใหม่ล้วน ๆ ไม่มีประวัติคุยมาก่อนเลย** แล้วถามว่า "What is my name and which city do I live in?" — ได้คำตอบถูกต้อง "Your name is Kidsapon and you live in Bangkok." ซึ่งเป็นไปได้ทางเดียวคือมาจาก memory-notes system message ที่ inject เข้าไป (พิสูจน์ทั้ง extraction และ injection ทำงานจริงข้าม session)
+  - ลบ test user ทิ้งหลังยืนยันเสร็จ (cascade ลบ session/message/memory note ที่สร้างระหว่างทดสอบทั้งหมด)
+
+### เกณฑ์รับงาน
+
+- [x] ระบบสกัดข้อเท็จจริงที่ถาวรจากบทสนทนาอัตโนมัติหลังตอบเสร็จ โดยไม่เพิ่ม latency ให้ user เห็น
+- [x] ข้อเท็จจริงที่จำไว้ถูกใช้ในบทสนทนาถัดไปข้าม session จริง (ยืนยันด้วยมือ)
+- [x] ผู้ใช้ดู/ลบสิ่งที่ระบบจำไว้ได้เอง (privacy control)
+- [x] Ollama ล่มระหว่าง extraction ไม่กระทบการตอบแชทหลัก
+- [x] ไม่มี regression กับ Phase 1–10 เดิม (unit/e2e/frontend suite ผ่านครบ)
+
+**สถานะ**: Code + tests เสร็จครบ, ยืนยันจริงกับ Ollama จริงผ่าน isolated environment แล้ว — ยังไม่ commit และยังไม่ deploy ขึ้น production (รอ confirm จากผู้ใช้ก่อนตาม convention ของ session นี้)
+
+---
+
 ## Test strategy
 
 ### สถานะปัจจุบัน

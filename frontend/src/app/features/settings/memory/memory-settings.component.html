@@ -1,0 +1,81 @@
+<ds-app-shell
+  sidebarTitle="Settings"
+  [userInitial]="(authStore.currentUser()?.displayName ?? 'U').charAt(0)"
+  [showAdmin]="authStore.isAdmin()"
+  (newChat)="onNewChat()"
+  (admin)="onAdmin()"
+>
+  <div sidebar-list>
+    <a class="nav-item" routerLink="/settings/providers">AI Providers</a>
+    <a class="nav-item nav-item--active" routerLink="/settings/memory">Memory</a>
+    <p class="hint">What the assistant has remembered about you across conversations.</p>
+  </div>
+
+  <div sidebar-footer>
+    <a class="link-button" routerLink="/chat">← Back to chat</a>
+    <button type="button" class="link-button" (click)="onLogout()">Sign out</button>
+  </div>
+
+  <div main>
+    <ds-page-header title="Memory">
+      <span actions class="page-subtitle">
+        After each conversation, durable facts and preferences may be extracted and reused
+        in future chats. Delete anything you don't want remembered.
+      </span>
+    </ds-page-header>
+
+    @if (error(); as message) {
+      <p class="form-error" role="alert">{{ message }}</p>
+    }
+
+    @if (loading()) {
+      <p class="hint">Loading memory notes…</p>
+    } @else if (notes().length === 0) {
+      <p class="hint">Nothing remembered yet.</p>
+    } @else {
+      <div class="memory-toolbar">
+        <button type="button" class="link-button link-button--danger" (click)="requestDeleteAll()">
+          Delete all
+        </button>
+      </div>
+
+      <ul class="memory-list">
+        @for (note of notes(); track note.id) {
+          <li>
+            <ds-hairline-card>
+              <div class="memory-note">
+                <p class="memory-note__content">{{ note.content }}</p>
+                <button
+                  type="button"
+                  class="memory-note__delete"
+                  aria-label="Delete this memory note"
+                  (click)="requestDelete(note)"
+                >
+                  Delete
+                </button>
+              </div>
+            </ds-hairline-card>
+          </li>
+        }
+      </ul>
+    }
+  </div>
+</ds-app-shell>
+
+<ds-confirm-dialog
+  [open]="noteBeingDeleted() !== null"
+  title="Delete this memory note?"
+  message="The assistant will no longer use this fact in future conversations."
+  confirmLabel="Delete"
+  (confirmed)="confirmDelete()"
+  (cancelled)="cancelDelete()"
+/>
+
+<ds-confirm-dialog
+  [open]="confirmingDeleteAll()"
+  title="Delete all memory notes?"
+  message="This clears everything the assistant has remembered about you. This cannot be undone."
+  confirmLabel="Delete all"
+  (confirmed)="confirmDeleteAll()"
+  (cancelled)="cancelDeleteAll()"
+/>

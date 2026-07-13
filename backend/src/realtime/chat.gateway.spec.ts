@@ -55,6 +55,7 @@ describe('ChatGateway chat:stop', () => {
     streamRegistry as never,
     {} as never,
     {} as never,
+    {} as never,
     new WsRateLimiterService(),
     usersService as never,
     {} as never,
@@ -116,6 +117,10 @@ describe('ChatGateway chat:send failure handling', () => {
   const providerSettingsService = {
     isProviderAvailable: jest.fn(),
   };
+  const memoryService = {
+    notesForPrompt: jest.fn(),
+    extractFromExchange: jest.fn(),
+  };
   const usersService = {
     findById: jest.fn(() => Promise.resolve({ role: 'user' })),
   };
@@ -136,6 +141,7 @@ describe('ChatGateway chat:send failure handling', () => {
     streamRegistry as never,
     artifactsService as never,
     providerSettingsService as never,
+    memoryService as never,
     wsRateLimiter,
     usersService as never,
     metricsService as never,
@@ -159,6 +165,8 @@ describe('ChatGateway chat:send failure handling', () => {
     sessionsService.setTitleIfDefault.mockResolvedValue(undefined);
     streamRegistry.hasActiveStream.mockReturnValue(false);
     providerSettingsService.isProviderAvailable.mockResolvedValue(true);
+    memoryService.notesForPrompt.mockResolvedValue(null);
+    memoryService.extractFromExchange.mockResolvedValue(undefined);
     messagesService.createUserMessage.mockResolvedValue({
       id: 'user-message',
       sessionId: 'session-1',
@@ -600,6 +608,120 @@ describe('ChatGateway chat:send failure handling', () => {
 
     expect(sessionsService.getOwned).not.toHaveBeenCalled();
   });
+
+  describe('chat memory (Phase 11)', () => {
+    it('injects the user’s memory notes as a system message when notes exist', async () => {
+      memoryService.notesForPrompt.mockResolvedValue([
+        'Lives in Bangkok',
+        'Prefers dark mode',
+      ]);
+      aiProviderFactory.hasProvider.mockReturnValue(true);
+      const streamChat = jest.fn(async function* (_request: {
+        messages: Array<{ role: string; content: string }>;
+      }) {
+        yield { type: 'done' as const, finishReason: 'complete' as const };
+      });
+      aiProviderFactory.getProvider.mockReturnValue({ streamChat });
+      streamRegistry.register.mockReturnValue(new AbortController());
+
+      await gateway.onChatSend(client, {
+        sessionId: 'session-1',
+        content: 'hello',
+      });
+
+      expect(memoryService.notesForPrompt).toHaveBeenCalledWith('user-1');
+      const request = streamChat.mock.calls[0][0];
+      const memoryMessage = request.messages.find((m: { content: string }) =>
+        m.content.includes('Known facts about this user'),
+      );
+      expect(memoryMessage).toEqual({
+        role: 'system',
+        content:
+          'Known facts about this user from past conversations:\n- Lives in Bangkok\n- Prefers dark mode',
+      });
+    });
+
+    it('omits the memory system message entirely when the user has no notes', async () => {
+      memoryService.notesForPrompt.mockResolvedValue(null);
+      aiProviderFactory.hasProvider.mockReturnValue(true);
+      const streamChat = jest.fn(async function* (_request: {
+        messages: Array<{ role: string; content: string }>;
+      }) {
+        yield { type: 'done' as const, finishReason: 'complete' as const };
+      });
+      aiProviderFactory.getProvider.mockReturnValue({ streamChat });
+      streamRegistry.register.mockReturnValue(new AbortController());
+
+      await gateway.onChatSend(client, {
+        sessionId: 'session-1',
+        content: 'hello',
+      });
+
+      const request = streamChat.mock.calls[0][0];
+      expect(
+        request.messages.some((m: { content: string }) =>
+          m.content.includes('Known facts about this user'),
+        ),
+      ).toBe(false);
+    });
+
+    it('fires memory extraction (without awaiting it) after a completed response with content', async () => {
+      aiProviderFactory.hasProvider.mockReturnValue(true);
+      aiProviderFactory.getProvider.mockReturnValue({
+        async *streamChat() {
+          yield { type: 'token' as const, delta: 'hi there' };
+          yield { type: 'done' as const, finishReason: 'complete' as const };
+        },
+      });
+      streamRegistry.register.mockReturnValue(new AbortController());
+
+      await gateway.onChatSend(client, {
+        sessionId: 'session-1',
+        content: 'hello',
+      });
+
+      expect(memoryService.extractFromExchange).toHaveBeenCalledWith(
+        'user-1',
+        'session-1',
+        'hello',
+        'hi there',
+      );
+    });
+
+    it('does not fire memory extraction when the response errors', async () => {
+      aiProviderFactory.hasProvider.mockReturnValue(true);
+      aiProviderFactory.getProvider.mockReturnValue({
+        async *streamChat() {
+          yield { type: 'error' as const, message: 'upstream unavailable' };
+        },
+      });
+      streamRegistry.register.mockReturnValue(new AbortController());
+
+      await gateway.onChatSend(client, {
+        sessionId: 'session-1',
+        content: 'hello',
+      });
+
+      expect(memoryService.extractFromExchange).not.toHaveBeenCalled();
+    });
+
+    it('does not fire memory extraction when the assistant produced no content', async () => {
+      aiProviderFactory.hasProvider.mockReturnValue(true);
+      aiProviderFactory.getProvider.mockReturnValue({
+        async *streamChat() {
+          yield { type: 'done' as const, finishReason: 'complete' as const };
+        },
+      });
+      streamRegistry.register.mockReturnValue(new AbortController());
+
+      await gateway.onChatSend(client, {
+        sessionId: 'session-1',
+        content: 'hello',
+      });
+
+      expect(memoryService.extractFromExchange).not.toHaveBeenCalled();
+    });
+  });
 });
 
 describe('ChatGateway message payload validation (DTOs)', () => {
@@ -693,6 +815,7 @@ describe('ChatGateway auth is enforced by the gateway itself, independent of the
     {} as never,
     streamRegistry as never,
     artifactsService as never,
+    {} as never,
     {} as never,
     new WsRateLimiterService(),
     {} as never,

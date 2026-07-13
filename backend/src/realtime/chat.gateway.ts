@@ -28,6 +28,7 @@ import {
   normalizeArtifactFilename,
 } from '../artifacts/artifacts.service';
 import { ProviderSettingsService } from '../provider-settings/provider-settings.service';
+import { MemoryService } from '../memory/memory.service';
 import { UsersService } from '../users/users.service';
 import { MetricsService } from '../common/metrics.service';
 import { SessionJoinDto } from './dto/session-join.dto';
@@ -72,6 +73,12 @@ function deriveSessionTitle(content: string): string | null {
   const lastSpace = truncated.lastIndexOf(' ');
   const base = lastSpace > 10 ? truncated.slice(0, lastSpace) : truncated;
   return `${base}…`;
+}
+
+function memoryContextMessage(notes: string[] | null): string | null {
+  if (!notes || notes.length === 0) return null;
+  const bullets = notes.map((note) => `- ${note}`).join('\n');
+  return `Known facts about this user from past conversations:\n${bullets}`;
 }
 
 function artifactContextMessage(
@@ -124,6 +131,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly streamRegistry: ActiveStreamRegistry,
     private readonly artifactsService: ArtifactsService,
     private readonly providerSettingsService: ProviderSettingsService,
+    private readonly memoryService: MemoryService,
     private readonly wsRateLimiter: WsRateLimiterService,
     private readonly usersService: UsersService,
     private readonly metricsService: MetricsService,
@@ -302,8 +310,14 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       body.sessionId,
     );
     const currentFiles = artifactContextMessage(latestArtifacts);
+    const memoryNotes = memoryContextMessage(
+      await this.memoryService.notesForPrompt(userId),
+    );
     const aiMessages: AiMessage[] = [
       { role: 'system', content: SYSTEM_PROMPT },
+      ...(memoryNotes
+        ? [{ role: 'system' as const, content: memoryNotes }]
+        : []),
       ...(currentFiles
         ? [{ role: 'system' as const, content: currentFiles }]
         : []),
@@ -472,6 +486,21 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         tokenCount,
       );
       this.server.to(room).emit('chat:message:updated', { message: updated });
+
+      // Fire-and-forget: extractFromExchange() catches all its own errors
+      // internally and never rejects, so this deliberately isn't awaited —
+      // memory extraction must never add latency to (or fail) a chat response
+      // that has already been delivered to the client. Only a genuinely
+      // completed exchange with real assistant content is worth learning
+      // from; an error/stopped response has nothing durable to extract.
+      if (finalStatus === 'complete' && proseContent.trim()) {
+        void this.memoryService.extractFromExchange(
+          userId,
+          body.sessionId,
+          body.content,
+          proseContent,
+        );
+      }
     }
   }
 

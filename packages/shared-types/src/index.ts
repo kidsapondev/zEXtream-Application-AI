@@ -48,6 +48,14 @@ export interface CodeArtifactDto {
   createdAt: string;
 }
 
+export interface MemoryNoteDto {
+  id: string;
+  content: string;
+  sourceSessionId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface ProviderSettingDto {
   provider: AiProviderKey;
   /**

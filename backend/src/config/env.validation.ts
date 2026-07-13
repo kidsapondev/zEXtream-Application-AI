@@ -84,6 +84,17 @@ export const envSchema = z.object({
     (value) => (value === '' ? undefined : value),
     z.string().min(16).optional(),
   ),
+  // Ollama model used to extract durable facts/preferences from each finished exchange
+  // into that user's long-term memory notes (see MemoryService) — deliberately always
+  // Ollama regardless of which provider the user is chatting with, since it's a cheap
+  // background task, not user-facing generation quality. Unset disables the memory
+  // feature entirely (extraction is skipped, no notes are ever created) rather than
+  // failing startup, since a deployment with no vision/small model pulled shouldn't be
+  // forced to run this.
+  MEMORY_EXTRACTION_MODEL: z.preprocess(
+    (value) => (value === '' ? undefined : value),
+    z.string().optional(),
+  ),
   // Comma-separated allowlist of exact origins allowed to make credentialed cross-origin
   // requests (e.g. "http://localhost:4200,https://staging.example.com"). Kept
   // backward-compatible with the historical single-origin value. Left unset in

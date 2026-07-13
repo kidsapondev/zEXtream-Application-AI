@@ -19,6 +19,7 @@ import { ArtifactsModule } from './artifacts/artifacts.module';
 import { ProviderSettingsModule } from './provider-settings/provider-settings.module';
 import { AdminPermissionsModule } from './admin/admin-permissions.module';
 import { AdminModule } from './admin/admin.module';
+import { MemoryModule } from './memory/memory.module';
 
 @Module({
   imports: [
@@ -54,6 +55,7 @@ import { AdminModule } from './admin/admin.module';
     ProviderSettingsModule,
     RealtimeModule,
     AdminModule,
+    MemoryModule,
   ],
   controllers: [AppController],
   providers: [

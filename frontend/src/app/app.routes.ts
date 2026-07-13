@@ -43,6 +43,14 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'settings/memory',
+    canMatch: [authGuard, guestGuard],
+    loadComponent: () =>
+      import('./features/settings/memory/memory-settings.component').then(
+        (m) => m.MemorySettingsComponent,
+      ),
+  },
+  {
     path: 'admin',
     canMatch: [authGuard, guestGuard, adminGuard],
     loadComponent: () =>

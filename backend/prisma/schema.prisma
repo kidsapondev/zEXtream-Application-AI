@@ -29,6 +29,7 @@ model User {
   refreshTokens RefreshToken[]
   chatSessions  ChatSession[]
   providerCredentials ProviderCredential[]
+  memoryNotes   UserMemoryNote[]
   adminPermissionGrants AdminPermissionGrant[]
   adminAuditLogEntriesAsActor  AdminAuditLogEntry[] @relation("AdminAuditActor")
   adminAuditLogEntriesAsTarget AdminAuditLogEntry[] @relation("AdminAuditTarget")
@@ -196,6 +197,20 @@ model RefreshToken {
   @@index([tokenHash])
   @@index([familyId])
   @@map("refresh_tokens")
+}
+
+model UserMemoryNote {
+  id              String   @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  userId          String   @map("user_id") @db.Uuid
+  content         String
+  sourceSessionId String?  @map("source_session_id") @db.Uuid
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@map("user_memory_notes")
 }
 
 model ProviderCredential {
