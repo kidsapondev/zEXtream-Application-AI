@@ -9,7 +9,9 @@ Lets the locally-hosted Ollama model **actually read and write files on the host
 instead of only emitting code into the chat transcript. Everything runs on this machine —
 no cloud model is involved in this path.
 
-## The pipeline
+## Two entry points, one sandbox
+
+**A — Web chat.** The backend drives the loop and streams tokens over WebSocket:
 
 ```
 Browser ─ws─> NestJS backend (Docker)
@@ -20,8 +22,43 @@ Browser ─ws─> NestJS backend (Docker)
                                                               └─ /workspace/* → real disk
 ```
 
-The model never touches disk directly. Every file operation is a tool call the backend
-executes on its behalf, through a single sandboxed HTTP surface.
+**B — MCP, from an IDE.** The IDE spawns the server; no backend, no Docker, no token
+(stdio + IDE-launch is the trust boundary):
+
+```
+IDE ─stdio─> host-bridge/dist/mcp-main.js
+                ├─ local_workspace_*  ──────> workspace.ts (same sandbox as A)
+                └─ local_code_agent ─http──> OLLAMA_BASE_URL
+                     └─ runOllamaAgent()  ← the second, non-streaming loop
+```
+
+The model never touches disk directly in either path. Every file operation goes through
+`resolveInWorkspace`. Runbook for path B: `docs/local-gpu-agent.md`.
+
+## Delegation playbook — Claude plans, the local model types
+
+The point of path B is token economy: hand bulk mechanical work to the GPU instead of
+paying a frontier model to emit it. A 500-line edit costs roughly 12k tokens to write
+directly versus under 1k to delegate and review.
+
+**Worth delegating:** boilerplate, cross-file renames, format conversions, repetitive
+tests, first-pass scaffolding, mechanical refactors with a clear rule.
+
+**Not worth delegating:** architecture, cross-file debugging, anything security-relevant,
+anything where the spec is the hard part.
+
+**How to do it well:**
+
+1. **Commit first.** The workspace is a real checkout; git is the only undo.
+2. **One concrete step per call.** "Add field `x` to interface `Y` and update every call
+   site" works. "Implement auth" does not.
+3. **Name the files.** The local model wastes turns exploring; `path` narrows its root.
+4. **Review the diff, not the transcript.** `git diff --stat` then read only what changed.
+5. **Re-delegate, don't argue.** If the result is wrong, `git checkout` and reissue a
+   sharper task — a 14B model rarely recovers through discussion.
+
+MCP servers load at session start, so a newly registered server is not callable in the
+session that registered it.
 
 ## Key files
 
@@ -33,6 +70,14 @@ executes on its behalf, through a single sandboxed HTTP surface.
 | `host-bridge/src/workspace.ts` | **The security boundary.** Path resolution + containment checks. |
 | `host-bridge/src/workspace-fs.ts` | list/read/write/search implementations. |
 | `host-bridge/src/workspace-routes.ts` | zod-validated `/workspace/*` endpoints. |
+| `host-bridge/src/agent/ollama-agent.ts` | The MCP-side loop. Non-streaming (`stream: false`) — the IDE waits for a result. |
+| `host-bridge/src/mcp/tools.ts` | The six MCP tools. Handlers are plain data so tests call them directly. |
+| `host-bridge/src/mcp-main.ts` | stdio entry point. **Never log to stdout** — that is the MCP transport. |
+
+`text-tool-call-parser.ts` exists **twice**, in `backend/src/ai/providers/` and
+`host-bridge/src/agent/`. Neither package can import the other (Docker vs. host, and
+host-bridge's `tsc` is rooted at `src/`), so this is a deliberate twin. **Fix bugs in
+both.** Only the backend copy carries the streaming buffer logic.
 
 ## Enabling it
 
