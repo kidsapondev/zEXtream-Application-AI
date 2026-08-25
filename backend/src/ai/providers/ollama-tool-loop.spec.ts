@@ -199,6 +199,51 @@ describe('OllamaProvider workspace tool loop', () => {
     });
   });
 
+  it('recovers a tool call the model emitted as plain text instead of tool_calls', async () => {
+    // The real, reproduced behaviour of qwen2.5-coder:14b on Ollama 0.32.15 — see
+    // text-tool-call-parser.ts. `tool_calls` never arrives; the call is bare JSON in
+    // `content`, split across chunks the way a real stream delivers it.
+    const execute = jest.fn().mockResolvedValue({
+      ok: true,
+      content: 'name, version, scripts...',
+      summary: 'read_file(package.json) -> 812 bytes',
+    });
+    mockTurns([
+      '{"message":{"role":"assistant","content":"{\\"name\\": \\"write_file\\", "},"done":false}\n{"message":{"role":"assistant","content":"\\"arguments\\": {\\"path\\": \\"a.ts\\", \\"content\\": \\"x\\"}}"},"done":false}\n{"done":true,"done_reason":"stop"}\n',
+      '{"message":{"role":"assistant","content":"All set."},"done":false}\n{"done":true,"done_reason":"stop"}\n',
+    ]);
+
+    const provider = createProvider(enabledTools(execute));
+    const events = await collect(chat(provider, 'write a.ts'));
+
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(toolCallArg(execute)).toEqual({
+      function: {
+        name: 'write_file',
+        arguments: { path: 'a.ts', content: 'x' },
+      },
+    });
+    // The raw JSON must never reach the user — only the summary and the real answer.
+    expect(prose(events)).not.toContain('"arguments"');
+    expect(prose(events)).toContain('read_file(package.json) -> 812 bytes');
+    expect(prose(events)).toContain('All set.');
+  });
+
+  it('streams a genuine JSON answer as prose rather than swallowing it', async () => {
+    // The other side of the same coin: buffered text that turns out not to be a call must
+    // still reach the user in full.
+    const execute = jest.fn();
+    mockTurns([
+      '{"message":{"role":"assistant","content":"{\\"port\\": 3000}"},"done":false}\n{"done":true,"done_reason":"stop"}\n',
+    ]);
+
+    const provider = createProvider(enabledTools(execute));
+    const events = await collect(chat(provider, 'show me the config'));
+
+    expect(execute).not.toHaveBeenCalled();
+    expect(prose(events)).toBe('{"port": 3000}');
+  });
+
   it('sends the tool definitions and slots the workspace prompt beside the caller system turn', async () => {
     const fetchMock = mockTurns([
       '{"message":{"role":"assistant","content":"hi"},"done":false}\n{"done":true,"done_reason":"stop"}\n',

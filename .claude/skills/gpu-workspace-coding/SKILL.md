@@ -66,13 +66,46 @@ changing `host-bridge/.env`.
 - **Tool summaries are streamed as prose**, not a new WebSocket event, so they land in the
   saved transcript as an audit trail of what the model touched.
 
-## Model requirements
+## Model requirements — and the trap
 
 The Ollama model must report the `tools` capability:
 
 ```bash
 curl -s localhost:11434/api/tags | grep -o '"capabilities":\[[^]]*\]'
 ```
+
+**But reporting `tools` is not enough, and this is the single biggest gotcha here.**
+Verified by hand against Ollama 0.32.15 + `qwen2.5-coder:14b`: given a correct `tools`
+payload, the model produces the right call but emits it as *bare JSON in
+`message.content`*:
+
+```json
+{"name": "read_file", "arguments": {"path": "backend/package.json"}}
+```
+
+That model's Ollama template only parses a call back into `tool_calls` when it is wrapped
+in `<tool_call></tool_call>` tags. The wrapper is missing, so `tool_calls` never arrives.
+Reproduced with and without a system prompt. **The failure mode is silent** — no error,
+the tool loop just never fires and the user sees raw JSON in the chat.
+
+`text-tool-call-parser.ts` exists for exactly this. `runTurn` buffers content whose first
+non-whitespace characters could still be a call (`{`, `[`, `<tool_call>`, ```` ```json ````)
+and resolves it when the turn ends; anything else streams token-by-token as before. A
+normal ```` ``` ```` code fence deliberately does **not** trigger buffering — that is the
+common case and must keep streaming.
+
+Recovery is conservative and all-or-nothing: a call is only recovered when its `name`
+matches a tool offered on that request, so a model legitimately answering with JSON is
+never mistaken for a tool call.
+
+If you swap models, **test the real thing** — do not trust the capability flag:
+
+```bash
+curl -s localhost:11434/api/chat -H "Content-Type: application/json" \
+  --data-binary @scratch/toolcall.json | head -c 500
+```
+
+and check whether the call comes back in `message.tool_calls` or in `message.content`.
 
 `qwen2.5-coder:14b` (Q4_K_M, 32k ctx) is the verified working model here. On a 16 GB card
 it loads at roughly 93% GPU / 7% CPU — a long tool loop pushes context up and can spill

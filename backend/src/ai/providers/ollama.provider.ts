@@ -10,6 +10,10 @@ import { CircuitBreakerService } from '../circuit-breaker.service';
 import { fetchWithRetry } from './fetch-with-retry';
 import { OllamaToolCall, OllamaToolDefinition } from '../tools/tool.types';
 import { WorkspaceToolsService } from '../tools/workspace-tools.service';
+import {
+  looksLikeToolCallStart,
+  parseTextToolCalls,
+} from './text-tool-call-parser';
 
 /**
  * Ollama's own wire format for a chat message. Deliberately NOT `AiMessage`: the
@@ -355,6 +359,40 @@ export class OllamaProvider implements AiProvider {
     const decoder = new TextDecoder();
     let buffer = '';
 
+    // Text-encoded tool-call recovery. See text-tool-call-parser.ts for why this is
+    // necessary rather than merely defensive: the model this deployment runs emits its
+    // tool calls as bare JSON in `content`, so `tool_calls` never arrives.
+    //
+    // Content can't be streamed straight through while that's still possible, or the raw
+    // JSON would reach the user's screen before we knew it was a call. So the first
+    // non-whitespace characters of the turn decide: anything that could be a call is
+    // buffered until the turn ends, anything else switches to plain streaming for good.
+    // With no tools offered there is nothing to recover, so the mode starts at
+    // 'streaming' and this whole mechanism is inert.
+    const toolNames = new Set((tools ?? []).map((tool) => tool.function.name));
+    let sawStructuredToolCall = false;
+    let contentBuffer = '';
+    let contentMode: 'undecided' | 'buffering' | 'streaming' =
+      toolNames.size === 0 ? 'streaming' : 'undecided';
+
+    /** Resolves whatever is still buffered when the turn ends: either recovered tool
+     *  calls, or — when it turned out to be ordinary prose after all — the text itself. */
+    const finalizeContent = function* (): Generator<TurnEvent> {
+      if (contentMode !== 'buffering' || contentBuffer === '') return;
+      if (!sawStructuredToolCall) {
+        const recovered = parseTextToolCalls(contentBuffer, toolNames);
+        if (recovered.length > 0) {
+          for (const call of recovered) {
+            yield { type: 'tool-call', call };
+          }
+          contentBuffer = '';
+          return;
+        }
+      }
+      yield { type: 'token', delta: contentBuffer };
+      contentBuffer = '';
+    };
+
     try {
       while (true) {
         const { done, value } = await reader.read();
@@ -379,17 +417,33 @@ export class OllamaProvider implements AiProvider {
             this.logger.warn(`Skipping malformed Ollama stream line: ${line}`);
             continue;
           }
-          if (chunk.message?.content) {
-            yield { type: 'token', delta: chunk.message.content };
+          const content = chunk.message?.content;
+          if (content) {
+            if (contentMode === 'streaming') {
+              yield { type: 'token', delta: content };
+            } else {
+              contentBuffer += content;
+              if (contentMode === 'undecided' && contentBuffer.trim() !== '') {
+                if (looksLikeToolCallStart(contentBuffer)) {
+                  contentMode = 'buffering';
+                } else {
+                  contentMode = 'streaming';
+                  yield { type: 'token', delta: contentBuffer };
+                  contentBuffer = '';
+                }
+              }
+            }
           }
           // Unlike OpenAI's API, Ollama does not stream tool-call arguments as
           // incremental JSON fragments that have to be concatenated — each call arrives
           // whole in a single chunk, so collecting them needs no reassembly buffer.
           for (const call of chunk.message?.tool_calls ?? []) {
+            sawStructuredToolCall = true;
             yield { type: 'tool-call', call };
           }
           if (chunk.done) {
             clearTimeout(inactivityTimer);
+            yield* finalizeContent();
             yield {
               type: 'done',
               finishReason: chunk.done_reason ?? 'stop',
@@ -406,6 +460,7 @@ export class OllamaProvider implements AiProvider {
         }
       }
       clearTimeout(inactivityTimer);
+      yield* finalizeContent();
       yield { type: 'done', finishReason: 'stop' };
     } catch (err) {
       clearTimeout(inactivityTimer);
