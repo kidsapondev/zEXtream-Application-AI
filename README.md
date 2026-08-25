@@ -4,7 +4,7 @@ zEXtream-Application-AI เป็นเว็บแอปสำหรับส�
 
 โปรเจกต์นี้เป็น TypeScript monorepo ประกอบด้วย Angular frontend, NestJS backend, PostgreSQL, Prisma ORM, Socket.IO และ Ollama
 
-> สถานะปัจจุบัน: เหมาะสำหรับการพัฒนาและทดลองใช้งานภายใน ระบบรองรับ Ollama จริงเพียง provider เดียว แม้ type และ schema จะเตรียมค่า `claude` และ `openai` ไว้แล้ว ดูข้อจำกัดเพิ่มเติมในหัวข้อ [ข้อจำกัดที่ทราบ](#ข้อจำกัดที่ทราบ)
+> สถานะปัจจุบัน: เหมาะสำหรับการพัฒนาและทดลองใช้งานภายใน Ollama ใช้งานได้ทันทีโดยไม่ต้องตั้งค่าเพิ่ม ส่วน `claude` และ `openai` ใช้งานได้จริงเช่นกันแต่เป็น optional ต้องตั้งค่า host-bridge เพื่อยืม CLI ที่ล็อกอินอยู่แล้วบนเครื่อง host แทนการเก็บ API key ต่อผู้ใช้ (ดู [docs/deployment.md](./docs/deployment.md#claudecodex-via-host-bridge-optional)) ดูข้อจำกัดเพิ่มเติมในหัวข้อ [ข้อจำกัดที่ทราบ](#ข้อจำกัดที่ทราบ)
 
 ## ความสามารถหลัก
 
@@ -19,6 +19,8 @@ zEXtream-Application-AI เป็นเว็บแอปสำหรับส�
 - เปิดและแก้ไข artifact ด้วย Monaco Editor
 - เก็บ revision history ของแต่ละ filename
 - แยกข้อมูล session และ artifact ตามเจ้าของบัญชี
+- ให้ Ollama ที่รันบน GPU เครื่องนี้อ่าน เขียน และค้นหาไฟล์จริงบนเครื่อง host ผ่าน sandboxed tool loop (local-GPU workspace coding)
+- เปิดโมเดล local ตัวเดียวกันให้ IDE ที่รองรับ MCP (VS Code, Cursor, Claude Code ฯลฯ) เรียกใช้เป็น coding agent เสริมได้ผ่าน `host-bridge` (ดู [docs/local-gpu-agent.md](./docs/local-gpu-agent.md))
 - Docker Compose สำหรับ development และ production-like deployment
 
 ## Technology stack
@@ -43,6 +45,7 @@ zEXtream-Application-AI/
 │   │   └── schema.prisma        # Database schema
 │   ├── src/
 │   │   ├── ai/                  # Provider abstraction, Ollama และ artifact parser
+│   │   │   └── tools/           # Workspace tool schemas สำหรับ Ollama tool-calling loop (local-GPU)
 │   │   ├── artifacts/           # Artifact queries และ revision creation
 │   │   ├── auth/                # Login, JWT strategies และ refresh rotation
 │   │   ├── chat/                # Session และ message services/controllers
@@ -66,6 +69,14 @@ zEXtream-Application-AI/
 │   ├── nginx.conf
 │   ├── proxy.conf.json
 │   └── Dockerfile
+├── host-bridge/                 # รันตรงบน host (ไม่ใช่ Docker) — claude/codex CLI + /workspace/* + MCP
+│   └── src/
+│       ├── workspace.ts         # Security boundary: path containment สำหรับ sandbox
+│       ├── workspace-fs.ts      # list/read/write/search implementations
+│       ├── workspace-routes.ts  # zod-validated /workspace/* endpoints (HTTP, ใช้โดย backend)
+│       ├── agent/               # local_code_agent: tool loop ของ MCP server
+│       ├── mcp/                 # MCP tool schemas และ stdio server
+│       └── mcp-main.ts          # Entry point ของ MCP server (build แล้วคือ dist/mcp-main.js)
 ├── packages/shared-types/       # DTO และ WebSocket contracts ที่ใช้ร่วมกัน
 ├── docker-compose.yml           # Base services
 ├── docker-compose.override.yml  # Development overrides
@@ -142,6 +153,19 @@ export const answer = 42;
 - ระหว่าง stream frontend จะแสดงไฟล์ชั่วคราวด้วย `tempId`
 - เมื่อ fence จบ backend จะบันทึก `CodeArtifact` แล้วส่ง database ID กลับมา
 - การแก้ไขใน editor จะสร้าง artifact revision ใหม่ โดยเชื่อม `parentArtifactId` ไปยัง revision ก่อนหน้า
+
+## Local-GPU coding agent (MCP)
+
+โมเดล Ollama ที่รันบนเครื่องนี้ใช้งานได้สองทาง ทั้งคู่ใช้ sandbox และเครื่องมือ read/write/search
+ชุดเดียวกันบนเครื่อง host ต่างกันแค่ "ใครเป็นคนขับ tool loop":
+
+- **ผ่านหน้าแชทของเว็บนี้** — backend (`OllamaProvider`) เป็นคนขับ loop เอง ผู้ใช้พิมพ์คำสั่ง
+  ในแชท โมเดลอ่าน/เขียนไฟล์บนเครื่อง host ผ่าน `host-bridge` แล้ว stream คำตอบกลับผ่าน WebSocket
+- **ผ่าน IDE ที่รองรับ MCP** (VS Code, Cursor, Claude Code ฯลฯ) — IDE เป็นคนขับ loop เอง โดย
+  spawn MCP server ตัวเดียวกัน (`host-bridge/dist/mcp-main.js`) ผ่าน stdio เพื่อยืมโมเดล local
+  เครื่องนี้ไปช่วยงานเป็น coding agent เสริม นอกเหนือจาก agent หลักของ IDE
+
+ดูขั้นตอนติดตั้งและตัวอย่าง config ทั้งหมดใน [`docs/local-gpu-agent.md`](./docs/local-gpu-agent.md)
 
 ## ข้อกำหนดระบบ
 
@@ -619,7 +643,7 @@ pnpm --filter backend exec prisma studio
 
 ## การเพิ่ม AI provider
 
-Type และ database enum เตรียม `claude` และ `openai` ไว้แล้ว แต่ยังต้อง implement runtime provider ก่อนใช้งานจริง:
+`ollama`, `claude` และ `openai` มี runtime provider ครบแล้วทั้งสามตัว (สองตัวหลังผ่าน host-bridge) ขั้นตอนต่อไปนี้ใช้สำหรับเพิ่ม provider **ตัวใหม่**:
 
 1. สร้าง class ที่ implement `AiProvider` ใน `backend/src/ai/providers/`
 2. กำหนด `key` ให้ตรงกับ `AiProviderKey`
@@ -634,7 +658,7 @@ Type และ database enum เตรียม `claude` และ `openai` ไ�
 
 รายการต่อไปนี้เป็นข้อจำกัดของ implementation ปัจจุบัน:
 
-- Runtime รองรับเพียง Ollama แต่ DTO และ database ยอมรับ Claude/OpenAI
+- `claude` และ `openai` ต้องพึ่ง host-bridge ที่รันบนเครื่อง host พร้อม CLI ที่ล็อกอินไว้แล้ว จึงใช้ได้เฉพาะ deployment แบบผู้ดูแลคนเดียว ไม่ใช่ multi-tenant
 - Artifact content ไม่ถูกนำกลับเข้า AI history ทำให้ follow-up ที่อ้างถึงไฟล์เดิมไม่มี source code ล่าสุดใน context
 - Socket ถูก cache ไว้และยังไม่มี lifecycle สำหรับ disconnect/re-authenticate ตอน logout หรือเปลี่ยน user
 - `chat:stop` ยังไม่ตรวจว่า message เป็นของ user ที่ส่งคำสั่งหยุด
@@ -645,6 +669,9 @@ Type และ database enum เตรียม `claude` และ `openai` ไ�
 - การเปลี่ยน session อย่างรวดเร็วอาจเกิด stale HTTP response เขียนทับ state ของ session ใหม่
 - Artifact socket handlers ยังไม่กรอง event ด้วย current session ID
 - ปุ่ม provider settings ชี้ไป route ที่ยังไม่มี implementation
+- Tool loop สำหรับอ่าน/เขียน/ค้นหาไฟล์จริงบน host (local-GPU workspace coding) ใช้ได้เฉพาะกับ Ollama เท่านั้น — `claude`/`codex` มีเครื่องมือแก้ไฟล์ของตัวเองอยู่แล้วผ่าน CLI จึงไม่ได้ผูกเข้ากับ tool loop นี้
+- Exec (`local_code_agent`/`run_command` สั่งรันคำสั่งบน host ได้) เป็นค่าเริ่มต้นปิดอยู่เสมอ ต้องเปิดเองผ่าน `BRIDGE_EXEC_ALLOWLIST` ทั้งฝั่ง web chat และ MCP
+- โมเดล local ขนาด 14B ทำ multi-step tool use ได้ด้อยกว่าโมเดล frontier อย่างชัดเจน บาง task ต้องลองใหม่ (retry) กว่าจะสำเร็จ
 - Test suite ปัจจุบันเป็น smoke test และยังไม่ครอบคลุม auth rotation, WebSocket authorization, streaming และ artifact parser
 - ยังไม่มี rate limiting, audit logging, observability หรือ API documentation generator เช่น OpenAPI
 

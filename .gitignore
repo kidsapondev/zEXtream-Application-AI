@@ -10,6 +10,7 @@ login.md
 # IDE
 .vscode/*
 !.vscode/extensions.json
+!.vscode/mcp.json.example
 .idea/
 
 # Docker volumes bind-mounted for local dev only

@@ -1,0 +1,13 @@
+{
+  "servers": {
+    "zextream-local-agent": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["C:\\path\\to\\zEXtream-Application-AI\\host-bridge\\dist\\mcp-main.js"],
+      "env": {
+        "BRIDGE_WORKSPACE_ROOT": "C:\\path\\to\\an\\llm-accessible\\workspace",
+        "OLLAMA_BASE_URL": "http://localhost:11434"
+      }
+    }
+  }
+}
