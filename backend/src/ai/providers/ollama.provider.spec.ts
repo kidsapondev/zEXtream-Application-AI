@@ -4,6 +4,7 @@ import {
   OLLAMA_STREAM_INACTIVITY_TIMEOUT_MS,
   OllamaProvider,
 } from './ollama.provider';
+import { WorkspaceToolsService } from '../tools/workspace-tools.service';
 import { AiStreamEvent } from '../ai-provider.interface';
 import {
   CircuitBreakerService,
@@ -12,8 +13,24 @@ import {
 
 const encode = (text: string) => new TextEncoder().encode(text);
 
+/**
+ * Workspace tools disabled — the default for every existing test in this file, which all
+ * assert the plain single-turn streaming behaviour. With `isEnabled()` false the provider
+ * sends no `tools` field and never runs a second turn, so these tests exercise exactly
+ * the same path they did before tool calling existed.
+ */
+function createDisabledWorkspaceTools(): WorkspaceToolsService {
+  return {
+    isEnabled: () => false,
+    definitions: () => [],
+    systemPrompt: () => '',
+    execute: jest.fn(),
+  } as unknown as WorkspaceToolsService;
+}
+
 function createProvider(
   circuitBreaker: CircuitBreakerService = new CircuitBreakerService(),
+  workspaceTools: WorkspaceToolsService = createDisabledWorkspaceTools(),
 ): OllamaProvider {
   const configService = {
     getOrThrow: jest.fn().mockReturnValue('http://ollama.local'),
@@ -21,6 +38,7 @@ function createProvider(
   return new OllamaProvider(
     configService as unknown as ConfigService,
     circuitBreaker,
+    workspaceTools,
   );
 }
 

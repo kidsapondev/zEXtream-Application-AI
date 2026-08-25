@@ -54,6 +54,11 @@ services:
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL}
       CLAUDE_BRIDGE_URL: ${CLAUDE_BRIDGE_URL:-}
       CODEX_BRIDGE_URL: ${CODEX_BRIDGE_URL:-}
+      # Points at the same host-bridge process as the two URLs above, but gates a
+      # different capability: real read/write (and optionally exec) access to a directory
+      # on the host, exposed to the local Ollama model as tools. Separate on purpose —
+      # running the claude/codex CLI bridge must not imply granting disk access.
+      WORKSPACE_BRIDGE_URL: ${WORKSPACE_BRIDGE_URL:-}
       HOST_BRIDGE_TOKEN: ${HOST_BRIDGE_TOKEN:-}
       MEMORY_EXTRACTION_MODEL: ${MEMORY_EXTRACTION_MODEL:-}
       CORS_ORIGIN: ${CORS_ORIGIN}

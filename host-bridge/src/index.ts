@@ -7,9 +7,15 @@ import { config } from './config';
 import { requireBridgeToken } from './auth-middleware';
 import { claudeChat, claudeStatus } from './claude';
 import { codexChat, codexStatus } from './codex';
+import { registerWorkspaceRoutes } from './workspace-routes';
 
 const app = express();
-app.use(express.json({ limit: '1mb' }));
+// 1mb was plenty while every body was a chat prompt; `/workspace/write` now puts whole
+// file contents through this same parser, so the limit has to clear `maxFileBytes`
+// (default 256_000 bytes) plus room for JSON-string escaping overhead and the request's
+// other fields. 4mb keeps a wide margin above the current default cap without opening
+// the door to unbounded bodies.
+app.use(express.json({ limit: '4mb' }));
 app.use(requireBridgeToken(config.bridgeToken));
 
 app.get('/claude/status', (req, res) => {
@@ -37,6 +43,12 @@ app.post('/codex/chat', (req, res) => {
     }
   });
 });
+
+// Registered after `requireBridgeToken` above, like every other route in this file — the
+// workspace filesystem/exec API is at least as sensitive as claude/codex chat (arguably
+// more, since it can read/write/execute arbitrary things inside the workspace root), so
+// it must never be reachable without the shared bridge token.
+registerWorkspaceRoutes(app);
 
 app.listen(config.port, () => {
   // eslint-disable-next-line no-console

@@ -84,6 +84,21 @@ export const envSchema = z.object({
     (value) => (value === '' ? undefined : value),
     z.string().min(16).optional(),
   ),
+  // Points at the same host-bridge process as CLAUDE_BRIDGE_URL/CODEX_BRIDGE_URL (see
+  // host-bridge/), but gates a deliberately different capability: real read/write/exec
+  // access to a project workspace on the deployment host, offered to the locally-hosted
+  // Ollama model (see backend/src/ai/tools/). CLAUDE_BRIDGE_URL only lets the bridge spawn
+  // an already-logged-in claude/codex CLI on the host — it never touches the filesystem on
+  // the backend's behalf — so a deployment can run that without ever granting disk access.
+  // This is therefore its own opt-in var rather than reusing CLAUDE_BRIDGE_URL, and leaving
+  // it unset disables workspace tools entirely (WorkspaceToolsService.isEnabled() reports
+  // false, exactly like the claude/openai providers report "unavailable" when their bridge
+  // URL is unset) rather than failing startup. It reuses HOST_BRIDGE_TOKEN for auth since
+  // it authenticates to the same bridge process, not a separate one.
+  WORKSPACE_BRIDGE_URL: z.preprocess(
+    (value) => (value === '' ? undefined : value),
+    z.url().optional(),
+  ),
   // Ollama model used to extract durable facts/preferences from each finished exchange
   // into that user's long-term memory notes (see MemoryService) — deliberately always
   // Ollama regardless of which provider the user is chatting with, since it's a cheap
