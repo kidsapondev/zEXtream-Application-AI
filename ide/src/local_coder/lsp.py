@@ -53,6 +53,7 @@ import asyncio
 import json
 import os
 import re
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Sequence
@@ -646,9 +647,28 @@ class LspClient:
         if not self._command:
             raise LspError("No language server command configured.")
 
+        # Resolve the command to a full path before spawning, rather than letting the OS do
+        # it. On Windows this is not a nicety: `npm install -g pyright` installs
+        # `pyright-langserver.CMD` and `.ps1` but **no `.exe`**, and `create_subprocess_exec`
+        # goes through `CreateProcess`, which only ever appends `.exe` — it does not consult
+        # PATHEXT. So the bare name raises `FileNotFoundError: [WinError 2]` for a server that
+        # is installed and working, and the app reports "not installed  ·  fix: npm install -g
+        # pyright" to a user who has just run exactly that. Verified by hand: the bare name
+        # fails, the path `shutil.which` returns spawns fine.
+        #
+        # `shutil.which` respects PATHEXT, so it finds the `.CMD` on Windows and behaves
+        # normally everywhere else. An absolute path the caller supplied is returned unchanged.
+        resolved = shutil.which(self._command[0])
+        if resolved is None:
+            raise LspError(
+                f"Language server '{self._command[0]}' is not installed or not on PATH."
+                f"  ·  fix: {install_hint(self._command[0])}"
+            )
+        argv = [resolved, *self._command[1:]]
+
         try:
             self._process = await asyncio.create_subprocess_exec(
-                *self._command,
+                *argv,
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,

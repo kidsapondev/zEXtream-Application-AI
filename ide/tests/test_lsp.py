@@ -579,18 +579,28 @@ class TestInstallHint:
 
 class TestStartup:
     async def test_a_missing_binary_names_the_install_command(self, tmp_path: Path) -> None:
-        client = LspClient(["pyright-langserver"], tmp_path)
+        # A name that cannot exist, rather than a real server's name. An earlier version of
+        # this test used "pyright-langserver" on the assumption that nothing was installed —
+        # then pyright was installed, the client dutifully spawned it, and the test failed on
+        # a handshake timeout. A test whose result depends on what happens to be on the
+        # machine is not testing the code.
+        client = LspClient(["definitely-not-a-language-server"], tmp_path)
 
         with pytest.raises(LspError) as raised:
             await client.start()
 
         message = str(raised.value)
-        assert "pyright-langserver" in message
-        assert "npm install -g pyright" in message
-        # The whole point: not a FileNotFoundError traceback. Nothing on this machine has a
-        # language server installed, so this is the *first* path a new user takes.
+        assert "definitely-not-a-language-server" in message
+        assert "not installed" in message
+        # The whole point: an actionable line, not a FileNotFoundError traceback.
         assert "Traceback" not in message
         assert not client.running
+
+    def test_the_install_hint_names_the_right_command_per_server(self) -> None:
+        # Pure function, so it can assert on pyright's hint without caring whether pyright is
+        # installed — which is exactly why the hint table is separate from `start()`.
+        assert "npm install -g pyright" in install_hint("pyright-langserver")
+        assert "npm install -g pyright" in install_hint("pyright-langserver.CMD")
 
     async def test_a_missing_binary_raises_before_anything_is_spawned(
         self, tmp_path: Path
