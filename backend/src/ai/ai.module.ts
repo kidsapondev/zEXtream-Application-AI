@@ -21,6 +21,8 @@ import { WorkspaceToolsService } from './tools/workspace-tools.service';
     WorkspaceBridgeClient,
     WorkspaceToolsService,
   ],
-  exports: [AiProviderFactory, WorkspaceToolsService],
+  // WorkspaceBridgeClient is exported so the HTTP surface in WorkspaceModule can reach the
+  // same client the tool loop uses - one set of timeouts, one place the token is read.
+  exports: [AiProviderFactory, WorkspaceToolsService, WorkspaceBridgeClient],
 })
 export class AiModule {}

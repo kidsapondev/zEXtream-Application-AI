@@ -20,6 +20,7 @@ import { ProviderSettingsModule } from './provider-settings/provider-settings.mo
 import { AdminPermissionsModule } from './admin/admin-permissions.module';
 import { AdminModule } from './admin/admin.module';
 import { MemoryModule } from './memory/memory.module';
+import { WorkspaceModule } from './workspace/workspace.module';
 
 @Module({
   imports: [
@@ -56,6 +57,7 @@ import { MemoryModule } from './memory/memory.module';
     RealtimeModule,
     AdminModule,
     MemoryModule,
+    WorkspaceModule,
   ],
   controllers: [AppController],
   providers: [
