@@ -1,0 +1,154 @@
+:host {
+  display: block;
+  height: 100vh;
+}
+
+.ws {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--ws-chrome);
+  color: var(--ws-text);
+  font-family: var(--font-body);
+}
+
+.ws__toolbar {
+  flex: none;
+}
+
+.ws__body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.ws__explorer {
+  flex: none;
+  width: var(--ws-explorer-width);
+
+  // Below this the tree and the editor are both too narrow to use; the editor is the one
+  // people came for, so the sidebar is the one that goes.
+  @media (max-width: 760px) {
+    display: none;
+  }
+}
+
+.ws__editor-column {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  background: var(--ws-editor);
+}
+
+.breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: none;
+  padding: var(--space-3) var(--space-5);
+  overflow-x: auto;
+  scrollbar-width: none;
+  border-bottom: 1px solid var(--ws-hairline);
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+.breadcrumb__crumb {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: none;
+  font-size: 12px;
+  color: var(--ws-text-muted);
+}
+
+.breadcrumb__crumb--file {
+  color: var(--ws-text);
+}
+
+.breadcrumb__sep {
+  flex: none;
+  color: var(--ws-text-muted);
+}
+
+.breadcrumb__status {
+  margin-left: auto;
+  padding-left: var(--space-4);
+  flex: none;
+  font-size: 12px;
+  color: var(--ws-text-muted);
+}
+
+.breadcrumb__status--error {
+  color: var(--ws-danger);
+}
+
+.ws__truncated {
+  flex: none;
+  margin: 0;
+  padding: var(--space-3) var(--space-5);
+  background: var(--ws-surface-raised);
+  border-bottom: 1px solid var(--ws-hairline);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--ws-warning);
+}
+
+.ws__editor {
+  flex: 1;
+  min-height: 0;
+  padding: var(--space-3) 0 0;
+}
+
+.ws__notice {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  flex: 1;
+  min-height: 0;
+  padding: var(--space-7) var(--space-5);
+  text-align: center;
+}
+
+.ws__notice-title {
+  font-family: var(--font-heading);
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--ws-text);
+}
+
+.ws__notice-body {
+  max-width: 52ch;
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--ws-text-secondary);
+}
+
+.ws__notice-retry {
+  height: 36px;
+  padding: 0 var(--space-5);
+  border: 1px solid var(--ws-hairline-strong);
+  border-radius: var(--ws-radius-md);
+  background: var(--ws-surface-raised);
+  color: var(--ws-text);
+  font-family: var(--font-body);
+  font-size: 13px;
+  cursor: pointer;
+
+  &:hover {
+    background: var(--ws-surface-hover);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--ws-accent);
+    outline-offset: 2px;
+  }
+}

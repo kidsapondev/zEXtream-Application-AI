@@ -1,0 +1,263 @@
+:host {
+  display: block;
+  height: 100%;
+  min-height: 0;
+}
+
+.explorer {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  padding: var(--space-4) var(--space-3);
+  gap: var(--space-3);
+  background: var(--ws-surface);
+  border-right: 1px solid var(--ws-hairline);
+}
+
+// Grouped, not repeated per control: five buttons want the same reset and focus ring.
+.explorer__new,
+.explorer__search,
+.explorer__menu-button,
+.explorer__menu button,
+.row__main {
+  display: inline-flex;
+  align-items: center;
+  border: 0;
+  background: transparent;
+  font: 400 13px var(--font-body);
+  cursor: pointer;
+
+  &:focus-visible {
+    outline: 2px solid var(--ws-accent);
+    outline-offset: 2px;
+  }
+}
+
+.explorer__search:hover,
+.explorer__menu-button:hover,
+.explorer__menu button:hover {
+  background: var(--ws-surface-hover);
+  color: var(--ws-text);
+}
+
+.explorer__actions {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.explorer__new {
+  justify-content: center;
+  gap: var(--space-2);
+  flex: 1;
+  min-width: 0;
+  height: 40px;
+  border-radius: var(--ws-radius-md);
+  background: var(--ws-accent);
+  color: var(--ws-accent-ink);
+  font-weight: 600;
+
+  &:hover {
+    filter: brightness(1.08);
+  }
+}
+
+.explorer__search {
+  justify-content: center;
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--ws-hairline-strong);
+  border-radius: var(--ws-radius-md);
+  background: var(--ws-surface-raised);
+  color: var(--ws-text-secondary);
+
+  &.explorer__search--on {
+    background: var(--ws-accent-soft);
+    border-color: var(--ws-accent);
+  }
+}
+
+.explorer__filter,
+.explorer__create-input {
+  height: 34px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--ws-hairline-strong);
+  border-radius: var(--ws-radius-sm);
+  background: var(--ws-editor);
+  color: var(--ws-text);
+  font-size: 12px;
+
+  &:focus {
+    outline: 2px solid var(--ws-accent);
+    outline-offset: -1px;
+  }
+}
+
+.explorer__heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 var(--space-2);
+}
+
+.explorer__title {
+  font: 700 11px var(--font-heading);
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--ws-text-muted);
+}
+
+.explorer__menu-anchor {
+  position: relative;
+}
+
+.explorer__menu-button {
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--ws-radius-sm);
+  color: var(--ws-text-muted);
+}
+
+.explorer__scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+}
+
+.explorer__menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 2;
+  min-width: 150px;
+  padding: var(--space-1);
+  border: 1px solid var(--ws-hairline-strong);
+  border-radius: var(--ws-radius-md);
+  background: var(--ws-surface-raised);
+  box-shadow: 0 12px 28px rgb(0 0 0 / 45%);
+
+  button {
+    width: 100%;
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--ws-radius-sm);
+    color: var(--ws-text-secondary);
+    text-align: left;
+  }
+}
+
+.explorer__tree {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding-bottom: var(--space-4);
+}
+
+.explorer__create-input {
+  display: block;
+  width: calc(100% - var(--space-4));
+  margin: var(--space-1) var(--space-2);
+  border-color: var(--ws-accent);
+  font-family: var(--font-mono);
+}
+
+.explorer__empty,
+.explorer__row-error {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.explorer__empty {
+  padding: var(--space-4) var(--space-3);
+  color: var(--ws-text-muted);
+}
+
+.explorer__row-error {
+  padding-bottom: var(--space-1);
+}
+
+.explorer__empty--error,
+.explorer__row-error {
+  color: var(--ws-danger);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 32px;
+  padding-right: var(--space-2);
+  border-radius: var(--ws-radius-md);
+
+  &:hover {
+    background: var(--ws-surface-hover);
+  }
+}
+
+// The mockup's filled rounded rectangle: the whole row, indentation included.
+.row--selected {
+  background: var(--ws-surface-active);
+
+  .row__name {
+    color: var(--ws-text);
+  }
+}
+
+.row__main {
+  flex: 1;
+  min-width: 0;
+  gap: var(--space-2);
+  height: 100%;
+  padding: 0 var(--space-2);
+  border-radius: var(--ws-radius-md);
+
+  &:focus-visible {
+    outline-offset: -2px;
+  }
+}
+
+.row__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ws-text-secondary);
+}
+
+.row__dot,
+.row__spinner,
+.row__chevron {
+  flex: none;
+  border-radius: 50%;
+}
+
+.row__chevron {
+  border-radius: 0;
+  color: var(--ws-text-muted);
+  transition: transform 0.15s ease;
+}
+
+.row__chevron--open {
+  transform: rotate(90deg);
+}
+
+.row__dot {
+  width: 7px;
+  height: 7px;
+  background: var(--ws-accent);
+}
+
+.row__spinner {
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--ws-hairline-strong);
+  border-top-color: var(--ws-accent);
+  animation: explorer-spin 0.7s linear infinite;
+}
+
+@keyframes explorer-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

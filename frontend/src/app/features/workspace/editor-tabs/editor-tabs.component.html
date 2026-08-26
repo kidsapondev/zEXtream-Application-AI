@@ -1,0 +1,76 @@
+<div class="tabs" role="tablist" aria-label="Open files">
+  <div class="tabs__strip">
+    @for (tab of tabs(); track tab.path) {
+      <!-- The close control is a sibling button, not a child of the tab button: a button
+           inside a button is invalid HTML and browsers recover from it inconsistently. -->
+      <div
+        class="tab"
+        [class.tab--active]="tab.path === activePath()"
+        [class.tab--dirty]="isDirty(tab)"
+      >
+        <button
+          type="button"
+          class="tab__main"
+          role="tab"
+          [attr.aria-selected]="tab.path === activePath()"
+          [title]="tab.path"
+          (click)="select.emit(tab.path)"
+        >
+          <app-file-icon [name]="tab.name" />
+          <span class="tab__name">{{ tab.name }}</span>
+          @if (tab.readOnly) {
+            <span class="tab__lock" title="Read-only: this file was truncated">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path
+                  d="M7 11V8a5 5 0 0 1 10 0v3"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                />
+                <rect
+                  x="5"
+                  y="11"
+                  width="14"
+                  height="9"
+                  rx="2.5"
+                  stroke="currentColor"
+                  stroke-width="2"
+                />
+              </svg>
+            </span>
+          }
+        </button>
+
+        <button
+          type="button"
+          class="tab__close"
+          [attr.aria-label]="'Close ' + tab.name"
+          (click)="close.emit(tab.path)"
+        >
+          <span class="tab__dot" aria-hidden="true"></span>
+          <svg
+            class="tab__x"
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="none"
+            aria-hidden="true"
+          >
+            <path
+              d="M6 6l12 12M18 6 6 18"
+              stroke="currentColor"
+              stroke-width="2.2"
+              stroke-linecap="round"
+            />
+          </svg>
+        </button>
+      </div>
+    }
+  </div>
+
+  <button type="button" class="tabs__add" (click)="create.emit()" aria-label="New file">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+    </svg>
+  </button>
+</div>

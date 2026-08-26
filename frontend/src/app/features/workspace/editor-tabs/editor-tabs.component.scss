@@ -1,0 +1,169 @@
+:host {
+  display: block;
+}
+
+.tabs {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--ws-tabstrip-height);
+  padding: var(--space-2) var(--space-3);
+  background: var(--ws-surface);
+  border-bottom: 1px solid var(--ws-hairline);
+}
+
+.tabs__strip {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+.tab {
+  display: flex;
+  align-items: center;
+  flex: none;
+  max-width: 220px;
+  border-radius: var(--ws-radius-md);
+  border: 1px solid transparent;
+  background: transparent;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease;
+
+  &:hover {
+    background: var(--ws-surface-hover);
+  }
+}
+
+.tab--active {
+  background: var(--ws-surface-active);
+  border-color: var(--ws-hairline-strong);
+
+  .tab__name {
+    color: var(--ws-text);
+  }
+}
+
+.tab__main {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  height: 32px;
+  padding: 0 var(--space-1) 0 var(--space-3);
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-family: var(--font-body);
+  cursor: pointer;
+
+  &:focus-visible {
+    outline: 2px solid var(--ws-accent);
+    outline-offset: -2px;
+    border-radius: var(--ws-radius-md);
+  }
+}
+
+.tab__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  color: var(--ws-text-secondary);
+}
+
+.tab__lock {
+  display: inline-flex;
+  flex: none;
+  color: var(--ws-warning);
+}
+
+.tab__close {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  margin-right: 6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ws-text-muted);
+  cursor: pointer;
+
+  &:hover {
+    background: var(--ws-hairline-strong);
+    color: var(--ws-text);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--ws-accent);
+    outline-offset: 1px;
+  }
+}
+
+.tab__dot {
+  display: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ws-accent);
+}
+
+// A dirty tab shows the unsaved dot until the pointer (or keyboard focus) arrives on the
+// close control, at which point it becomes the × it actually is. Same affordance VS Code
+// uses, and it keeps "unsaved" visible without spending a second slot on the tab.
+.tab--dirty {
+  .tab__dot {
+    display: block;
+  }
+
+  .tab__x {
+    display: none;
+  }
+
+  .tab__close:hover,
+  .tab__close:focus-visible {
+    .tab__dot {
+      display: none;
+    }
+
+    .tab__x {
+      display: block;
+    }
+  }
+}
+
+.tabs__add {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  margin-left: auto;
+  border: 1px solid var(--ws-hairline);
+  border-radius: var(--ws-radius-md);
+  background: var(--ws-surface-raised);
+  color: var(--ws-text-secondary);
+  cursor: pointer;
+
+  &:hover {
+    background: var(--ws-surface-hover);
+    color: var(--ws-text);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--ws-accent);
+    outline-offset: 2px;
+  }
+}

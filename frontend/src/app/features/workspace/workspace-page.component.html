@@ -1,0 +1,93 @@
+<div class="ws">
+  <app-workspace-toolbar
+    class="ws__toolbar"
+    [language]="store.activeTab()?.language ?? 'plaintext'"
+    [fileName]="store.activeTab()?.name ?? null"
+    (home)="onHome()"
+    (action)="onAction($event)"
+    (languageChange)="onLanguageChange($event)"
+  />
+
+  <div class="ws__body">
+    <app-file-explorer
+      class="ws__explorer"
+      [rows]="store.rows()"
+      [selectedPath]="store.selectedPath()"
+      [modifiedPaths]="store.modifiedPaths()"
+      [loading]="store.isInitializing()"
+      [error]="store.unavailableMessage() ?? store.rootNode()?.error ?? null"
+      (toggleDirectory)="store.toggleDirectory($event)"
+      (openFile)="store.openFile($event)"
+      (createFile)="store.createFile($event)"
+      (refresh)="store.reload()"
+      (collapseAll)="store.collapseAll()"
+    />
+
+    <section class="ws__editor-column">
+      <app-editor-tabs
+        [tabs]="store.tabs()"
+        [activePath]="store.activePath()"
+        (select)="store.activateTab($event)"
+        (close)="store.closeTab($event)"
+        (create)="onCreateRequested()"
+      />
+
+      @if (store.unavailableMessage(); as message) {
+        <div class="ws__notice" role="status">
+          <h2 class="ws__notice-title">Workspace unavailable</h2>
+          <!-- The server's own wording, verbatim: it names the two settings to change, and
+               paraphrasing it would send the operator to the wrong file. -->
+          <p class="ws__notice-body">{{ message }}</p>
+          <button type="button" class="ws__notice-retry" (click)="store.reload()">Try again</button>
+        </div>
+      } @else if (store.activeTab(); as tab) {
+        <nav class="breadcrumb" aria-label="Path of the open file">
+          @for (crumb of store.breadcrumb(); track crumb.path) {
+            @if (!$first) {
+              <span class="breadcrumb__sep" aria-hidden="true">›</span>
+            }
+            @if (crumb.isFile) {
+              <span class="breadcrumb__crumb breadcrumb__crumb--file">
+                <app-file-icon [name]="crumb.name" />
+                <span>{{ crumb.name }}</span>
+              </span>
+            } @else {
+              <span class="breadcrumb__crumb">{{ crumb.name }}</span>
+            }
+          }
+
+          @if (tab.saving) {
+            <span class="breadcrumb__status">Saving…</span>
+          } @else if (tab.error) {
+            <span class="breadcrumb__status breadcrumb__status--error">{{ tab.error }}</span>
+          }
+        </nav>
+
+        @if (tab.truncated) {
+          <p class="ws__truncated" role="status">
+            This file was cut off at the workspace's size limit, so only the first
+            {{ tab.bytes }} bytes are shown. It is read-only — saving would discard everything past
+            the cut.
+          </p>
+        }
+
+        <div class="ws__editor">
+          <app-monaco-editor
+            [content]="tab.content"
+            [language]="tab.language"
+            [readOnly]="tab.readOnly"
+            (contentChange)="store.edit(tab.path, $event)"
+            (saveRequested)="store.save(tab.path)"
+          />
+        </div>
+      } @else {
+        <div class="ws__notice" role="status">
+          <h2 class="ws__notice-title">No file open</h2>
+          <p class="ws__notice-body">
+            Pick a file from the explorer, or create one, to start editing.
+          </p>
+        </div>
+      }
+    </section>
+  </div>
+</div>

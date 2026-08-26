@@ -1,0 +1,56 @@
+<div class="toolbar">
+  <button type="button" class="toolbar__home" (click)="home.emit()" aria-label="Back to chat">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M3.5 10.6 12 3.5l8.5 7.1V19a1.5 1.5 0 0 1-1.5 1.5h-4.2v-5.6H9.2v5.6H5A1.5 1.5 0 0 1 3.5 19z"
+        stroke="currentColor"
+        stroke-width="1.6"
+        stroke-linejoin="round"
+      />
+    </svg>
+  </button>
+
+  <div class="toolbar__divider" aria-hidden="true"></div>
+
+  <div class="toolbar__actions" role="group" aria-label="Assistant actions">
+    @for (item of actions; track item.name) {
+      <button type="button" class="toolbar__action" (click)="action.emit(item.name)">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          @for (d of item.paths; track d) {
+            <path
+              [attr.d]="d"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+          }
+        </svg>
+        <span class="toolbar__action-label">{{ item.label }}</span>
+      </button>
+    }
+  </div>
+
+  <div class="toolbar__picker">
+    @if (fileName(); as name) {
+      <span class="toolbar__picker-file" [title]="name">{{ name }}</span>
+    }
+    <label class="toolbar__select">
+      <span class="visually-hidden">Editor language</span>
+      <select [value]="language()" (change)="onLanguagePicked($event)">
+        @for (option of languages(); track option) {
+          <option [value]="option">{{ option }}</option>
+        }
+      </select>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path
+          d="m6 9 6 6 6-6"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        />
+      </svg>
+    </label>
+  </div>
+</div>

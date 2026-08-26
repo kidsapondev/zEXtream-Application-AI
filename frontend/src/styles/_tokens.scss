@@ -38,3 +38,65 @@
   --color-text-secondary: #b3b0a6;
   --color-text-muted: #7d7a70;
 }
+
+/*
+ * Workspace (web IDE) chrome.
+ *
+ * These are appended rather than folded into the palette above because the IDE is
+ * deliberately dark in *both* app themes. A code surface is read for hours at a time and
+ * every editor a developer already has muscle memory for — VS Code, JetBrains, Zed — is
+ * dark by default; flipping the editor to the app's parchment-light canvas would make the
+ * one screen people stare at longest the one that fights them. So `--ws-*` carries a single
+ * dark scale and never varies by `data-theme`, while the surrounding app keeps honouring it.
+ *
+ * Nothing above this comment is modified — other work in flight depends on those values.
+ */
+:root {
+  --ws-chrome: #141317;
+  --ws-surface: #1c1b21;
+  --ws-surface-raised: #232228;
+  --ws-surface-hover: #2a2932;
+  --ws-surface-active: #32313c;
+  --ws-editor: #18171c;
+
+  --ws-hairline: #2b2a33;
+  --ws-hairline-strong: #3a3945;
+
+  --ws-text: #ecebf2;
+  --ws-text-secondary: #a5a3b3;
+  --ws-text-muted: #6f6d7d;
+
+  --ws-accent: #7c6cf0;
+  --ws-accent-soft: #2a2545;
+  --ws-accent-ink: #ffffff;
+  --ws-danger: #e26a5f;
+  --ws-warning: #e6b455;
+
+  /* Per-filetype icon badges. Tuned to read at 20px against --ws-surface, which is why
+   * these are not the language brands' own hex values — several of those (Python's navy,
+   * PHP's slate) disappear at that size on a dark row. */
+  --ws-icon-php: #8b7cf6;
+  --ws-icon-js: #e5c453;
+  --ws-icon-ts: #4d9be6;
+  --ws-icon-py: #55c07c;
+  --ws-icon-css: #4aa8e0;
+  --ws-icon-html: #e2703a;
+  --ws-icon-json: #d9b64a;
+  --ws-icon-md: #93919f;
+  --ws-icon-img: #d167a8;
+  --ws-icon-default: #5c5a68;
+  --ws-icon-ink: #14131a;
+
+  /* Rounder than the app's --radius-* on purpose: the mockup's whole character is soft
+   * corners and roomy padding, and reusing --radius-md (10px) at panel scale reads sharp. */
+  --ws-radius-sm: 8px;
+  --ws-radius-md: 12px;
+  --ws-radius-lg: 16px;
+
+  --ws-toolbar-height: 60px;
+  --ws-tabstrip-height: 46px;
+  --ws-explorer-width: 276px;
+
+  --font-mono:
+    'JetBrains Mono', 'Fira Code', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}

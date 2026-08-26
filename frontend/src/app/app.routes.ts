@@ -35,6 +35,12 @@ export const routes: Routes = [
       import('./features/chat/chat-workspace.component').then((m) => m.ChatWorkspaceComponent),
   },
   {
+    path: 'workspace',
+    canMatch: [authGuard, guestGuard],
+    loadChildren: () =>
+      import('./features/workspace/workspace.routes').then((m) => m.workspaceRoutes),
+  },
+  {
     path: 'settings/providers',
     canMatch: [authGuard, guestGuard],
     loadComponent: () =>
