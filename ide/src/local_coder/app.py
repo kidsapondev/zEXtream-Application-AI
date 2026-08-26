@@ -32,11 +32,13 @@ from textual.widgets import (
     Static,
     TabbedContent,
     TabPane,
+    TextArea,
     Tree,
 )
 from textual.widgets.tree import TreeNode
 from textual.worker import Worker
 
+from .editor_commands import comment_prefix, duplicate_lines, move_lines, toggle_comment
 from .errors import explain, status_problems
 from .file_index import FileIndex
 from .git import GitRepo
@@ -54,6 +56,7 @@ from .ui.problems_panel import ProblemsPanel
 from .ui.review_panel import ReviewPanel
 from .ui.run_panel import RunPanel
 from .ui.search_panel import SearchPanel
+from .theme import LOCAL_CODER_EDITOR_THEME, LOCAL_CODER_THEME
 from .workspace import WorkspaceTree
 
 #: Language servers tried on startup, first one present wins. Deliberately a short list of
@@ -74,53 +77,95 @@ class LocalCoderApp(App[None]):
     """The whole app. Construct with a backend; `main()` builds the real one."""
 
     CSS = """
-    Screen { layout: vertical; }
+    /* One spacing rhythm throughout: panels breathe with a single column of padding, and
+       separation is carried by a hairline rule rather than by gaps. In a terminal, empty
+       rows are expensive — a gap costs a line of code you could have been reading. */
+
+    Screen { layout: vertical; background: $background; }
 
     #body { height: 1fr; }
 
     #tree {
-        width: 32;
-        border-right: solid $panel-darken-2;
+        width: 34;
+        background: $surface;
+        border-right: solid $panel;
         padding: 0 1;
+        scrollbar-size-vertical: 1;
     }
+    #tree:focus-within { border-right: solid $primary; }
 
-    #editor-area { width: 1fr; }
+    #editor-area { width: 1fr; background: $surface; }
     #editor { height: 1fr; }
 
     #find { display: none; height: auto; }
     #find.visible { display: block; }
 
+    /* The finder floats over the editor rather than displacing it: it is a transient lookup,
+       and reflowing the whole layout for it makes the file you were reading jump. */
     #finder {
         display: none;
-        dock: top;
-        width: 60%;
-        offset: 20% 4;
+        layer: overlay;
+        width: 70%;
+        max-width: 90;
+        offset: 15% 6;
         background: $panel;
-        border: solid $accent;
+        border: round $primary;
+        padding: 0 1;
     }
     #finder.visible { display: block; }
 
-    #dock { height: 18; border-top: solid $panel-darken-2; }
+    #dock {
+        height: 18;
+        border-top: solid $panel;
+        background: $surface;
+    }
+    #dock:focus-within { border-top: solid $primary; }
 
-    #task { border: none; background: $boost; }
-    #log { height: 1fr; padding: 0 1; }
+    #task {
+        border: none;
+        background: $boost;
+        padding: 0 1;
+    }
+    #log {
+        height: 1fr;
+        padding: 0 1;
+        background: $surface;
+        scrollbar-size-vertical: 1;
+    }
 
+    /* The status line is the one row always on screen, so it gets the panel colour to read
+       as chrome rather than as content, and its segments are separated by a middot instead
+       of by borders — a border here would draw more attention than anything it contains. */
     #status {
         height: 1;
         padding: 0 1;
         background: $panel;
         color: $text-muted;
     }
+
+    Tabs { background: $surface; }
+    Tab { padding: 0 2; }
+
+    Tree > .tree--guides { color: $panel; }
+    Tree > .tree--guides-selected { color: $primary; }
     """
 
     BINDINGS = [
         Binding("ctrl+q", "quit", "Quit"),
         Binding("ctrl+s", "save", "Save"),
-        Binding("ctrl+r", "refresh", "Refresh"),
         Binding("ctrl+p", "find_file", "Go to file"),
         Binding("ctrl+f", "toggle_find", "Find"),
         Binding("ctrl+w", "close_tab", "Close tab"),
         Binding("ctrl+l", "focus_task", "Task"),
+        # Editing. `ctrl+/` is what every editor uses for comment toggling, but many
+        # terminals deliver it as ctrl+underscore instead of a distinct key — both are bound
+        # so the muscle memory works wherever the app is run.
+        Binding("ctrl+slash,ctrl+underscore", "toggle_comment", "Comment", show=False),
+        Binding("ctrl+d", "duplicate_line", "Duplicate", show=False),
+        Binding("alt+up", "move_line_up", "Move up", show=False),
+        Binding("alt+down", "move_line_down", "Move down", show=False),
+        Binding("f12", "goto_definition", "Definition", show=False),
+        Binding("ctrl+r", "refresh", "Refresh", show=False),
     ]
 
     def __init__(
@@ -189,6 +234,10 @@ class LocalCoderApp(App[None]):
 
     async def on_mount(self) -> None:
         self.title = "Local Coder"
+        # Registered and selected here rather than set as a class attribute: `register_theme`
+        # needs a live app, and selecting a theme the app does not know raises.
+        self.register_theme(LOCAL_CODER_THEME)
+        self.theme = LOCAL_CODER_THEME.name
         tree = self.query_one("#tree", Tree)
         tree.show_root = False
         tree.root.data = ""
@@ -525,6 +574,103 @@ class LocalCoderApp(App[None]):
     def action_focus_task(self) -> None:
         self.query_one("#dock", TabbedContent).active = "tab-agent"
         self.query_one("#task", Input).focus()
+
+    # -- editing -----------------------------------------------------------------------
+
+    def _selected_lines(self) -> tuple[TextArea, str, int, int] | None:
+        """The active editor plus the 0-based line range the selection covers.
+
+        `None` when no file is open or the tab is read-only. Every editing command routes
+        through here so the read-only case — a file truncated by the byte cap, where saving
+        would destroy the tail — is refused in exactly one place.
+        """
+        editor = self.query_one("#editor", EditorTabs)
+        area = editor.active_area
+        path = editor.active_path
+        if area is None or path is None:
+            self._set_status("open a file first")
+            return None
+        if area.read_only:
+            self._set_status("this file is read-only")
+            return None
+        start, end = area.selection
+        return area, path, start[0], end[0]
+
+    def _replace_all(self, area: TextArea, text: str, cursor_line: int) -> None:
+        """Swaps the whole buffer, keeping the cursor on a sensible line.
+
+        Whole-document replacement rather than a targeted edit because these commands are
+        defined as text-to-text transforms (see `editor_commands`), and reconstructing the
+        minimal edit from the result would be a second implementation of diff to maintain.
+        The cost is one undo entry per command, which is what a user expects anyway: ctrl+z
+        after a line move should undo the move, not part of it.
+        """
+        area.load_text(text)
+        line = max(0, min(cursor_line, area.document.line_count - 1))
+        area.move_cursor((line, 0))
+
+    def action_toggle_comment(self) -> None:
+        selected = self._selected_lines()
+        if selected is None:
+            return
+        area, path, start, end = selected
+        if comment_prefix(path) is None:
+            self._set_status("no line comment known for this file type")
+            return
+        self._replace_all(area, toggle_comment(area.text, start, end, path), start)
+
+    def action_duplicate_line(self) -> None:
+        selected = self._selected_lines()
+        if selected is None:
+            return
+        area, _path, start, end = selected
+        text, cursor = duplicate_lines(area.text, start, end)
+        self._replace_all(area, text, cursor)
+
+    def action_move_line_up(self) -> None:
+        self._move_lines(-1)
+
+    def action_move_line_down(self) -> None:
+        self._move_lines(1)
+
+    def _move_lines(self, delta: int) -> None:
+        selected = self._selected_lines()
+        if selected is None:
+            return
+        area, _path, start, end = selected
+        text, new_start, _new_end = move_lines(area.text, start, end, delta)
+        self._replace_all(area, text, new_start)
+
+    @work(exclusive=True, group="lsp-definition")
+    async def action_goto_definition(self) -> None:
+        """Jumps to where the symbol under the cursor is defined."""
+        if self._lsp is None:
+            self._set_status("no language server — install one with: npm install -g pyright")
+            return
+        editor = self.query_one("#editor", EditorTabs)
+        area = editor.active_area
+        path = editor.active_path
+        if area is None or path is None:
+            return
+
+        line, column = area.cursor_location
+        try:
+            location = await self._lsp.definition(path, line + 1, column + 1)
+        except AgentError as error:
+            self._set_status(explain(error))
+            return
+        if location is None:
+            self._set_status("no definition found")
+            return
+
+        # A definition often lands outside the workspace — pyright resolves stdlib symbols
+        # into its bundled typeshed stubs, which the sandbox will refuse to read and rightly
+        # so. Reporting where it went is more useful than an error about a path the user
+        # never typed.
+        if Path(location.path).is_absolute() or location.path.startswith(".."):
+            self._set_status(f"defined outside the workspace: {location.path}")
+            return
+        await self.open_path(location.path, line=location.line)
 
     # -- delegation --------------------------------------------------------------------
 

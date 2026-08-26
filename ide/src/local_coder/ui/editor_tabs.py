@@ -25,6 +25,7 @@ from textual.widget import Widget
 from textual.widgets import TabbedContent, TabPane, TextArea
 
 from ..protocols import FileContent
+from ..theme import LOCAL_CODER_EDITOR_THEME
 
 #: Extension to tree-sitter language name. Deliberately a second copy of `app.py`'s
 #: `_LANGUAGES`, not an import of it: `ui/__init__.py` states the rule for this package —
@@ -147,7 +148,22 @@ class EditorTabs(Widget):
             self._areas[path].focus()
             return
 
-        area = TextArea(content.text, read_only=content.truncated)
+        area = TextArea(
+            content.text,
+            read_only=content.truncated,
+            # Line numbers are not decoration here: every diagnostic, search hit and diff row
+            # in this app is addressed by line, and without a gutter none of those numbers
+            # mean anything on screen.
+            show_line_numbers=True,
+            # Code is not prose. Wrapping a long line changes which column the cursor reports,
+            # which would put every LSP position off by however much the wrap moved it.
+            soft_wrap=False,
+            tab_behavior="indent",
+        )
+        # Registered per instance because a `TextArea` only knows the themes registered on it,
+        # and these are created one per opened file rather than once at startup.
+        area.register_theme(LOCAL_CODER_EDITOR_THEME)
+        area.theme = LOCAL_CODER_EDITOR_THEME.name
         try:
             area.language = _language_for(path)
         except Exception:
