@@ -1,6 +1,7 @@
 import { ChangeDetectionStrategy, Component, inject, viewChild } from '@angular/core';
 import { Router } from '@angular/router';
 import { MonacoEditorComponent } from '../code-editor/monaco-editor.component';
+import { BottomDockComponent } from './bottom-dock/bottom-dock.component';
 import { EditorTabsComponent } from './editor-tabs/editor-tabs.component';
 import { FileExplorerComponent } from './file-explorer/file-explorer.component';
 import { FileIconComponent } from './file-icon/file-icon.component';
@@ -25,6 +26,7 @@ import { WorkspaceStore, type WorkspaceActionName } from './workspace.store';
     EditorTabsComponent,
     FileIconComponent,
     MonacoEditorComponent,
+    BottomDockComponent,
   ],
   templateUrl: './workspace-page.component.html',
   styleUrl: './workspace-page.component.scss',

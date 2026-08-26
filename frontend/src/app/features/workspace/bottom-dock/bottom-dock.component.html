@@ -1,0 +1,175 @@
+<section class="dock" [class.dock--collapsed]="collapsed()">
+  <div class="dock__strip" role="tablist" aria-label="Workspace panels">
+    <button
+      type="button"
+      role="tab"
+      class="dock__tab"
+      [class.dock__tab--active]="active() === 'problems'"
+      [attr.aria-selected]="active() === 'problems'"
+      (click)="select('problems')"
+    >
+      Problems
+      @if (problemCount()) {
+        <span class="dock__count">{{ problemCount() }}</span>
+      }
+    </button>
+    <button
+      type="button"
+      role="tab"
+      class="dock__tab"
+      [class.dock__tab--active]="active() === 'output'"
+      [attr.aria-selected]="active() === 'output'"
+      (click)="select('output')"
+    >
+      Output
+    </button>
+    <button
+      type="button"
+      role="tab"
+      class="dock__tab"
+      [class.dock__tab--active]="active() === 'terminal'"
+      [attr.aria-selected]="active() === 'terminal'"
+      (click)="select('terminal')"
+    >
+      Terminal
+    </button>
+    <button
+      type="button"
+      role="tab"
+      class="dock__tab"
+      [class.dock__tab--active]="active() === 'debug'"
+      [attr.aria-selected]="active() === 'debug'"
+      (click)="select('debug')"
+    >
+      Debug Console
+    </button>
+
+    <span class="dock__spacer"></span>
+
+    <button
+      type="button"
+      class="dock__icon"
+      title="Clear this panel"
+      aria-label="Clear this panel"
+      (click)="clearActive()"
+    >
+      ⌫
+    </button>
+    <button
+      type="button"
+      class="dock__icon"
+      [title]="collapsed() ? 'Expand panel' : 'Collapse panel'"
+      [attr.aria-label]="collapsed() ? 'Expand panel' : 'Collapse panel'"
+      (click)="toggleCollapsed()"
+    >
+      {{ collapsed() ? '⌃' : '⌄' }}
+    </button>
+  </div>
+
+  @if (!collapsed()) {
+    <div class="dock__body">
+      @switch (active()) {
+        @case ('problems') {
+          @if (problems().length) {
+            <ul class="dock__list">
+              @for (problem of problems(); track problem.path + problem.line) {
+                <li class="dock__row">
+                  <span class="dock__severity" [class.dock__severity--warn]="problem.severity === 'warning'">
+                    {{ problem.severity === 'error' ? 'x' : '!' }}
+                  </span>
+                  <span class="dock__where">{{ problem.path }}:{{ problem.line }}</span>
+                  <span>{{ problem.message }}</span>
+                </li>
+              }
+            </ul>
+          } @else {
+            <!-- Two different silences, said apart. "Nothing found" and "nothing is looking"
+                 render identically unless the panel distinguishes them. -->
+            <p class="dock__empty">
+              No analyser is connected to the browser yet, so nothing here is being checked.
+              Diagnostics currently come from the terminal application's language server.
+            </p>
+          }
+        }
+
+        @case ('output') {
+          @if (output().length) {
+            <ol class="dock__log">
+              @for (entry of output(); track $index) {
+                <li class="dock__log-line" [class.dock__log-line--error]="entry.kind === 'error'">
+                  <span class="dock__time">{{ entry.at | date: 'HH:mm:ss' }}</span>
+                  <span>{{ entry.text }}</span>
+                </li>
+              }
+            </ol>
+          } @else {
+            <p class="dock__empty">Nothing yet. Saves, refreshes and agent runs appear here.</p>
+          }
+        }
+
+        @case ('terminal') {
+          <div class="term">
+            @if (!execEnabled()) {
+              <p class="dock__empty">
+                Command execution is switched off. Set <code>BRIDGE_EXEC_ALLOWLIST</code> in
+                <code>host-bridge/.env</code> and restart the host-bridge process.
+              </p>
+            } @else {
+              <p class="term__allowed">
+                Runs directly, without a shell. Allowed:
+                @for (command of allowedCommands(); track command) {
+                  <code class="term__cmd">{{ command }}</code>
+                }
+              </p>
+            }
+
+            <ol class="term__log">
+              @for (entry of terminal(); track $index) {
+                <li class="term__entry">
+                  <p class="term__prompt"><span aria-hidden="true">›</span> {{ entry.command }}</p>
+                  @if (entry.refused) {
+                    <p class="term__refused">{{ entry.refused }}</p>
+                  } @else {
+                    @if (entry.stdout) {
+                      <pre class="term__out">{{ entry.stdout }}</pre>
+                    }
+                    @if (entry.stderr) {
+                      <pre class="term__out term__out--err">{{ entry.stderr }}</pre>
+                    }
+                    <p class="term__exit" [class.term__exit--bad]="entry.exitCode !== 0">
+                      exit {{ entry.exitCode ?? 'none' }}@if (entry.timedOut) {<span> · timed out</span>}
+                    </p>
+                  }
+                </li>
+              }
+            </ol>
+
+            <form class="term__form" (ngSubmit)="submit()">
+              <span class="term__caret" aria-hidden="true">›</span>
+              <input
+                class="term__input"
+                type="text"
+                name="command"
+                autocomplete="off"
+                spellcheck="false"
+                aria-label="Command to run"
+                [ngModel]="commandLine()"
+                (ngModelChange)="commandLine.set($event)"
+                (keydown)="onKeyDown($event)"
+                [disabled]="running()"
+                [placeholder]="running() ? 'Running…' : 'git status'"
+              />
+            </form>
+          </div>
+        }
+
+        @case ('debug') {
+          <p class="dock__empty">
+            No debugger is attached. This IDE runs commands and delegates edits to a local
+            model; stepping through a process is not something it can do yet.
+          </p>
+        }
+      }
+    </div>
+  }
+</section>

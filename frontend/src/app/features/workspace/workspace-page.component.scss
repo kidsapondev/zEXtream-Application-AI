@@ -152,3 +152,12 @@
     outline-offset: 2px;
   }
 }
+
+/* The dock is a fixed slice of the column rather than a percentage: an editor that shrinks
+   as terminal output arrives is disorienting, and the panel is read in short bursts while
+   the code above it is read continuously. */
+.ws__dock {
+  flex: none;
+  height: 15rem;
+  min-height: 0;
+}
