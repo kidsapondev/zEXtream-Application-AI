@@ -39,16 +39,35 @@ from textual.worker import Worker
 
 from .errors import explain, status_problems
 from .file_index import FileIndex
+from .git import GitRepo
 from .history import RunHistory
+from .lsp import Diagnostic, LspClient, language_id_for
 from .mcp_client import McpBackend
 from .protocols import AgentError, CoderBackend, Entry
 from .review import ReviewSession
+from .runner import Runner
 from .ui.editor_tabs import EditorTabs
 from .ui.file_finder import FileFinder
 from .ui.find_bar import FindBar
+from .ui.git_panel import GitPanel
+from .ui.problems_panel import ProblemsPanel
 from .ui.review_panel import ReviewPanel
+from .ui.run_panel import RunPanel
 from .ui.search_panel import SearchPanel
 from .workspace import WorkspaceTree
+
+#: Language servers tried on startup, first one present wins. Deliberately a short list of
+#: the servers this repo's own languages need rather than a registry: an IDE that silently
+#: spawns whatever it finds on PATH is a surprise nobody asked for, and each entry here is a
+#: process this app is responsible for cleaning up.
+#:
+#: None of these is installed by default. That is the normal state, not a fault — the app
+#: reports it once in the log with the install command and carries on without code
+#: intelligence, because everything else it does still works.
+LANGUAGE_SERVERS: tuple[tuple[str, ...], ...] = (
+    ("pyright-langserver", "--stdio"),
+    ("basedpyright-langserver", "--stdio"),
+)
 
 
 class LocalCoderApp(App[None]):
@@ -116,7 +135,14 @@ class LocalCoderApp(App[None]):
         self._tree_model = WorkspaceTree(backend)
         self._index = FileIndex(backend)
         self._review = ReviewSession(backend)
+        self._git = GitRepo(backend)
+        self._runner = Runner(backend)
         self._history = RunHistory()
+        #: Started on mount when a language server is actually installed, and `None` for the
+        #: whole session otherwise. Everything that touches it is guarded — code intelligence
+        #: is the one feature here that is genuinely optional, and an app that refuses to open
+        #: because pyright is missing would be worse than one without completion.
+        self._lsp: LspClient | None = None
         self._model = model
         #: Guards a second run while one is in flight. The model holds the GPU for the whole
         #: run, so a concurrent second run would queue behind the first and look like a hang.
@@ -150,6 +176,12 @@ class LocalCoderApp(App[None]):
                 )
                 yield RichLog(id="log", markup=True, wrap=True)
                 yield ReviewPanel(id="review")
+            with TabPane("Problems", id="tab-problems"):
+                yield ProblemsPanel(id="problems")
+            with TabPane("Run", id="tab-run"):
+                yield RunPanel(self._runner, id="run")
+            with TabPane("Git", id="tab-git"):
+                yield GitPanel(self._git, id="git")
             with TabPane("Search", id="tab-search"):
                 yield SearchPanel(self._backend, id="search")
         yield Static("starting…", id="status")
@@ -164,6 +196,66 @@ class LocalCoderApp(App[None]):
         await self._populate(tree.root, "")
         tree.root.expand()
         self.query_one("#task", Input).focus()
+        await self._start_language_server()
+
+    async def on_unmount(self) -> None:
+        # The language server is a child process holding an index of the whole workspace in
+        # memory. Leaving it running past the session would strand it with no parent to stop
+        # it — the same reason `McpBackend.close()` is not optional.
+        if self._lsp is not None:
+            await self._lsp.close()
+            self._lsp = None
+
+    # -- code intelligence -----------------------------------------------------------------
+
+    async def _start_language_server(self) -> None:
+        """Starts the first installed language server, or explains that there is none.
+
+        Failure here is reported once and then dropped: a missing server is the default state
+        on a fresh machine, and repeating the complaint on every file open would bury the log
+        the agent panel needs.
+        """
+        root = await self._workspace_root()
+        if root is None:
+            return
+        for command in LANGUAGE_SERVERS:
+            client = LspClient(
+                command,
+                root,
+                on_diagnostics=self._on_diagnostics,
+                on_log=lambda line: None,
+            )
+            try:
+                await client.start()
+            except AgentError:
+                continue
+            self._lsp = client
+            self._log(f"language server: {command[0]}", style="dim")
+            return
+        self._log(
+            "No language server found — no completion or diagnostics. "
+            "Install one with: npm install -g pyright",
+            style="dim",
+        )
+
+    async def _workspace_root(self) -> Path | None:
+        try:
+            status = await self._backend.status()
+        except AgentError:
+            return None
+        return Path(status.workspace_root) if status.workspace_root else None
+
+    def _on_diagnostics(self, _path: str, _diagnostics: tuple[Diagnostic, ...]) -> None:
+        """Called from the LSP client's reader task whenever the server republishes.
+
+        Repaints from the client's full store rather than from the one file in the callback:
+        the panel shows every open file's problems at once, and a server that clears a file's
+        diagnostics sends an *empty* list for it, which only reads correctly as "remove these"
+        when the whole set is redrawn.
+        """
+        if self._lsp is None:
+            return
+        self.query_one("#problems", ProblemsPanel).show(self._lsp.diagnostics())
 
     # -- status & logging ----------------------------------------------------------------
 
@@ -253,6 +345,14 @@ class LocalCoderApp(App[None]):
             return
 
         await editor.open(content)
+        if self._lsp is not None and not content.truncated:
+            # A truncated read is deliberately not opened with the server: it would be told
+            # the file ends where the byte cap did, and every diagnostic past that point would
+            # be wrong in a way nothing on screen explains.
+            try:
+                await self._lsp.did_open(path, content.text, language_id_for(path))
+            except AgentError as error:
+                self._log(explain(error), style="dim")
         if line is not None:
             area = editor.active_area
             if area is not None:
@@ -278,6 +378,58 @@ class LocalCoderApp(App[None]):
     @on(EditorTabs.Dirtied)
     def _on_dirtied(self, event: EditorTabs.Dirtied) -> None:
         self._set_status(f"{event.path} — modified")
+        self._sync_document(event.path)
+
+    @work(exclusive=False, group="lsp-sync")
+    async def _sync_document(self, path: str) -> None:
+        """Tells the language server what the buffer now says.
+
+        A worker because `Dirtied` arrives from a synchronous event handler and the client's
+        own debounce is an await. Not `exclusive`: two files can be edited in quick succession
+        and cancelling the first file's sync would leave the server holding stale text for it
+        indefinitely.
+        """
+        if self._lsp is None:
+            return
+        editor = self.query_one("#editor", EditorTabs)
+        text = editor.active_text if editor.active_path == path else None
+        if text is None:
+            return
+        try:
+            await self._lsp.did_change(path, text)
+        except AgentError:
+            # A server that died mid-session must not turn every keystroke into an error
+            # message; the problems panel simply stops updating.
+            return
+
+    # -- panels ------------------------------------------------------------------------
+
+    @on(ProblemsPanel.DiagnosticSelected)
+    async def _on_diagnostic_selected(
+        self, event: ProblemsPanel.DiagnosticSelected
+    ) -> None:
+        await self.open_path(event.path, line=event.line)
+
+    @on(GitPanel.FileSelected)
+    async def _on_git_file_selected(self, event: GitPanel.FileSelected) -> None:
+        await self.open_path(event.path)
+
+    @on(GitPanel.Committed)
+    def _on_committed(self, event: GitPanel.Committed) -> None:
+        self._log(f"committed: {event.summary}", style="green")
+        self._set_status(event.summary)
+
+    @on(RunPanel.Finished)
+    def _on_run_finished(self, event: RunPanel.Finished) -> None:
+        outcome = event.outcome
+        counts = ""
+        if outcome.passed is not None or outcome.failed is not None:
+            counts = f" · {outcome.passed or 0} passed, {outcome.failed or 0} failed"
+        self._log(
+            f"{outcome.config.name}: {'ok' if outcome.ok else 'FAILED'}"
+            f" in {outcome.duration_s:.1f}s{counts}",
+            style="green" if outcome.ok else "red",
+        )
 
     def action_toggle_find(self) -> None:
         find = self.query_one("#find", FindBar)
