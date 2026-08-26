@@ -403,3 +403,96 @@ describe('runOllamaAgent', () => {
     expect(mock).not.toHaveBeenCalled();
   });
 });
+
+describe('malformed tool calls', () => {
+  // Its own fixtures rather than the outer describe's: this block was added after the fact
+  // and sits at module level, where `root` and `run` are not in scope.
+  let root: string;
+  const realFetch = global.fetch;
+
+  const run = (task: string) =>
+    runOllamaAgent({
+      task,
+      model: MODEL,
+      baseUrl: BASE_URL,
+      workspaceRoot: root,
+      maxFileBytes: 256_000,
+      execAllowlist: [],
+      execTimeoutMs: 5_000,
+    });
+
+  beforeEach(() => {
+    root = mkdtempSync(path.join(tmpdir(), 'host-bridge-malformed-'));
+  });
+
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+    global.fetch = realFetch;
+  });
+
+  // Reproduces a real run: the model wrapped a well-formed-looking call in a ```json fence,
+  // but the file content it was writing held a Python """docstring""" whose unescaped quotes
+  // terminated the JSON string early. The whole object is unparseable, recovery correctly
+  // declines it, and without the retry below the loop treats 4.8 KB of JSON as a final answer
+  // and reports success having changed nothing.
+  const MALFORMED = [
+    '```json',
+    '{',
+    '  "name": "write_file",',
+    '  "arguments": {',
+    '    "path": "a.py",',
+    '    "content": "def f():\n    """docs"""\n    return 1"',
+    '  }',
+    '}',
+    '```',
+  ].join('\n');
+
+  it('tells the model its call was unusable instead of accepting it as the answer', async () => {
+    const mock = queueFetch([
+      chatResponse({ content: MALFORMED }),
+      chatResponse({ toolCalls: [{ name: 'list_files', args: {} }] }),
+      chatResponse({ content: 'Done.' }),
+    ]);
+
+    const result = await run('write a file');
+
+    expect(result.stoppedReason).toBe('done');
+    // The corrective turn happened, and the model went on to make a real call.
+    expect(mock).toHaveBeenCalledTimes(3);
+    expect(result.steps.map((step) => step.tool)).toEqual([
+      '(malformed tool call)',
+      'list_files',
+    ]);
+    expect(result.steps[0].ok).toBe(false);
+
+    const correction = sentBody(mock, 1).messages as Array<{ role: string; content: string }>;
+    expect(correction.at(-1)?.role).toBe('user');
+    expect(correction.at(-1)?.content).toContain('not a valid tool call');
+  });
+
+  it('gives up after the retry budget rather than nagging forever', async () => {
+    const mock = queueFetch([
+      chatResponse({ content: MALFORMED }),
+      chatResponse({ content: MALFORMED }),
+      chatResponse({ content: MALFORMED }),
+    ]);
+
+    const result = await run('write a file');
+
+    // Two corrections, then the third malformed answer is accepted as final.
+    expect(result.stoppedReason).toBe('done');
+    expect(mock).toHaveBeenCalledTimes(3);
+    expect(result.steps).toHaveLength(2);
+  });
+
+  it('leaves an ordinary prose answer alone', async () => {
+    // The detector keys on the tool-call *shape*; plain prose must never trigger a retry.
+    const mock = queueFetch([chatResponse({ content: 'A promise is a future value.' })]);
+
+    const result = await run('explain promises');
+
+    expect(mock).toHaveBeenCalledTimes(1);
+    expect(result.steps).toHaveLength(0);
+    expect(result.answer).toContain('future value');
+  });
+});

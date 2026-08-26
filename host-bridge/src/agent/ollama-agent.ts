@@ -140,6 +140,34 @@ type ToolName = (typeof TOOL_NAMES)[number];
  *  identical to the offered tools on purpose — a name outside this set stays prose. */
 const RECOVERABLE_TOOL_NAMES: Set<string> = new Set(TOOL_NAMES);
 
+/**
+ * How many times a run will tell the model its tool call was malformed and let it try again.
+ *
+ * Two, because the correction either lands immediately or not at all: a model that cannot
+ * escape its own string on the second attempt will not manage it on the fifth, and each
+ * attempt is a full prompt re-evaluation on the GPU.
+ */
+const MAX_MALFORMED_RETRIES = 2;
+
+/**
+ * True when the model plainly *meant* to call a tool and produced something unusable.
+ *
+ * Observed for real: asked to write a Python file, qwen2.5-coder:14b emitted a well-formed
+ * ```json fence containing `{"name": "write_file", "arguments": {...}}` whose `content`
+ * string held a Python docstring — three unescaped double quotes, which terminate the JSON
+ * string early and make the whole object unparseable. The recovery parser correctly declined
+ * it (repairing broken JSON is guesswork, and guessing wrong here writes a mangled file), so
+ * the loop treated 4.8 KB of JSON as the final answer, changed nothing on disk, and reported
+ * success.
+ *
+ * Detecting the *intent* is what lets the loop say so instead. Deliberately loose — this only
+ * gates a corrective message, so a false positive costs one wasted turn while a false negative
+ * costs the whole run.
+ */
+function looksLikeAttemptedToolCall(text: string): boolean {
+  return /"name"\s*:/.test(text) && /"arguments"\s*:/.test(text);
+}
+
 interface OllamaToolCall {
   function: { name: string; arguments: unknown };
 }
@@ -675,6 +703,8 @@ export async function runOllamaAgent(options: RunOllamaAgentOptions): Promise<Ag
   let sawUsage = false;
   let answer = '';
   let turns = 0;
+  // Counted per run, not per turn: two corrections is the budget for the whole attempt.
+  let malformedRetries = 0;
 
   const finish = (stoppedReason: AgentResult['stoppedReason'], error?: string): AgentResult => ({
     answer,
@@ -730,6 +760,35 @@ export async function runOllamaAgent(options: RunOllamaAgentOptions): Promise<Ag
     }
 
     if (calls.length === 0) {
+      // Nothing to run. Before accepting this as the final answer, check whether it is
+      // actually a tool call the model failed to encode — see looksLikeAttemptedToolCall.
+      // Saying so costs one turn; accepting it silently costs the entire run.
+      if (
+        malformedRetries < MAX_MALFORMED_RETRIES &&
+        looksLikeAttemptedToolCall(content)
+      ) {
+        malformedRetries += 1;
+        steps.push({
+          tool: '(malformed tool call)',
+          args: {},
+          ok: false,
+          summary: 'the model emitted a tool call that was not valid JSON — asked it to retry',
+        });
+        messages = [
+          ...messages,
+          { role: 'assistant', content },
+          {
+            role: 'user',
+            content:
+              'That was not a valid tool call and nothing was executed. The JSON could not ' +
+              'be parsed — most often because the file content contained unescaped double ' +
+              'quotes (a Python """docstring""" is the usual culprit) or a raw newline ' +
+              'inside a JSON string. Call the tool again. Every " inside a string value ' +
+              'must be written \\" and every newline \\n.',
+          },
+        ];
+        continue;
+      }
       return finish('done');
     }
 
