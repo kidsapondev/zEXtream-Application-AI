@@ -93,6 +93,15 @@ class WorkspaceTree:
         """
         return self._cache.get(path)
 
+    def cached_listings(self) -> tuple[tuple[Entry, ...], ...]:
+        """Every directory listing already fetched, without fetching anything more.
+
+        The review gate uses this to decide which files are worth snapshotting before an agent
+        run: the set of files the user has actually browsed to is a good proxy for the set a
+        run is likely to touch, and reading it costs nothing beyond what is already in memory.
+        """
+        return tuple(self._cache.values())
+
     def invalidate(self, path: str) -> None:
         """Forget one directory. Forgetting an unknown path is not an error."""
         self._cache.pop(path, None)

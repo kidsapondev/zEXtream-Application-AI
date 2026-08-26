@@ -1,14 +1,15 @@
 """The application: a terminal IDE whose "write the code" button is a model on this GPU.
 
-Layout is three panes — a workspace tree, an editor, and a task box with a run log. The tree
-and the editor are ordinary; the task box is the point. You describe a change, the local model
-makes it against real files, and the log shows every tool call it made so the work is
-reviewable rather than merely reported.
+Panes: a workspace tree, tabbed editors with find/replace, and a bottom dock carrying the
+agent log, the review gate, and project search. A file finder overlays the lot on demand.
 
-This module owns the wiring and the failure paths, deliberately: the individual pieces below
-it are small and independently testable, but the way they fail together — a server that never
-started, a run that half-finished and left files changed — is the part that needs to see the
-whole picture.
+This module owns the wiring and the failure paths, deliberately. The widgets under `ui/` are
+small and independently tested; what needs one place to see the whole picture is how they fail
+*together* — a run that half-finished and left files changed, a revert that could not be
+written back, a tree that is stale the instant the model touches disk.
+
+The rule the layout is built around: **nothing the model writes reaches the user's tree
+without passing the review gate first.** Everything else here is an editor.
 """
 
 from __future__ import annotations
@@ -20,39 +21,34 @@ from pathlib import Path
 from time import monotonic
 
 from textual import on, work
-from textual.worker import Worker
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
-from textual.widgets import Footer, Header, Input, RichLog, Static, TextArea, Tree
+from textual.widgets import (
+    Footer,
+    Header,
+    Input,
+    RichLog,
+    Static,
+    TabbedContent,
+    TabPane,
+    Tree,
+)
 from textual.widgets.tree import TreeNode
+from textual.worker import Worker
 
 from .errors import explain, status_problems
+from .file_index import FileIndex
 from .history import RunHistory
 from .mcp_client import McpBackend
 from .protocols import AgentError, CoderBackend, Entry
+from .review import ReviewSession
+from .ui.editor_tabs import EditorTabs
+from .ui.file_finder import FileFinder
+from .ui.find_bar import FindBar
+from .ui.review_panel import ReviewPanel
+from .ui.search_panel import SearchPanel
 from .workspace import WorkspaceTree
-
-#: Extension to Textual/tree-sitter language name, for editor syntax highlighting. Only the
-#: languages Textual ships a parser for are listed — naming one it cannot load raises, so an
-#: unknown extension deliberately falls through to no highlighting rather than guessing.
-_LANGUAGES = {
-    ".py": "python",
-    ".ts": "typescript",
-    ".js": "javascript",
-    ".json": "json",
-    ".md": "markdown",
-    ".html": "html",
-    ".css": "css",
-    ".yaml": "yaml",
-    ".yml": "yaml",
-    ".toml": "toml",
-    ".sql": "sql",
-}
-
-
-def language_for(path: str) -> str | None:
-    return _LANGUAGES.get(Path(path).suffix.lower())
 
 
 class LocalCoderApp(App[None]):
@@ -69,18 +65,25 @@ class LocalCoderApp(App[None]):
         padding: 0 1;
     }
 
-    #editor { width: 1fr; }
+    #editor-area { width: 1fr; }
+    #editor { height: 1fr; }
 
-    #bottom {
-        height: 16;
-        border-top: solid $panel-darken-2;
+    #find { display: none; height: auto; }
+    #find.visible { display: block; }
+
+    #finder {
+        display: none;
+        dock: top;
+        width: 60%;
+        offset: 20% 4;
+        background: $panel;
+        border: solid $accent;
     }
+    #finder.visible { display: block; }
 
-    #task {
-        border: none;
-        background: $boost;
-    }
+    #dock { height: 18; border-top: solid $panel-darken-2; }
 
+    #task { border: none; background: $boost; }
     #log { height: 1fr; padding: 0 1; }
 
     #status {
@@ -93,9 +96,12 @@ class LocalCoderApp(App[None]):
 
     BINDINGS = [
         Binding("ctrl+q", "quit", "Quit"),
-        Binding("ctrl+s", "save", "Save file"),
-        Binding("ctrl+r", "refresh", "Refresh tree"),
-        Binding("ctrl+l", "focus_task", "Focus task"),
+        Binding("ctrl+s", "save", "Save"),
+        Binding("ctrl+r", "refresh", "Refresh"),
+        Binding("ctrl+p", "find_file", "Go to file"),
+        Binding("ctrl+f", "toggle_find", "Find"),
+        Binding("ctrl+w", "close_tab", "Close tab"),
+        Binding("ctrl+l", "focus_task", "Task"),
     ]
 
     def __init__(
@@ -108,25 +114,22 @@ class LocalCoderApp(App[None]):
         super().__init__()
         self._backend = backend
         self._tree_model = WorkspaceTree(backend)
+        self._index = FileIndex(backend)
+        self._review = ReviewSession(backend)
         self._history = RunHistory()
         self._model = model
-        self._open_path: str | None = None
-        #: Guards against a second run being started while one is in flight. The model holds
-        #: the GPU for the whole run, so a concurrent second run would not just be confusing,
-        #: it would queue behind the first and look like a hang.
+        #: Guards a second run while one is in flight. The model holds the GPU for the whole
+        #: run, so a concurrent second run would queue behind the first and look like a hang.
         #:
-        #: Named `_agent_busy` rather than the obvious `_running`: Textual's `App` already
-        #: owns an attribute by that name and sets it True once the app loop starts, so the
-        #: obvious name both clobbers framework state and makes this guard permanently true —
-        #: which silently swallowed every run.
+        #: Named `_agent_busy` rather than the obvious `_running`: Textual's `App` already owns
+        #: that name and sets it True once the app loop starts, so the obvious name both
+        #: clobbers framework state and makes the guard permanently true — which silently
+        #: swallowed every run until it was found.
         self._agent_busy = False
-        #: Plain-text mirror of everything written to the on-screen log.
-        #:
-        #: Two reasons it exists rather than reading the widget back. A `RichLog` only holds
-        #: rendered lines once it has been laid out and given a size, so headless tests see
-        #: nothing in it — the record has to live outside the widget to be assertable. And a
-        #: run hands file-writing authority to a model: what it was asked and what it did has
-        #: to survive the terminal window closing, which is what `log_file` is for.
+        #: Plain-text mirror of the on-screen log. `RichLog` only holds rendered lines once it
+        #: has been laid out, so headless tests see nothing in it; and a run hands file-writing
+        #: authority to a model, so what it was asked and what it did has to outlive the
+        #: terminal window — which is what `log_file` is for.
         self._log_lines: list[str] = []
         self._log_file = log_file
 
@@ -136,13 +139,19 @@ class LocalCoderApp(App[None]):
         yield Header(show_clock=False)
         with Horizontal(id="body"):
             yield Tree("workspace", id="tree")
-            yield TextArea("", id="editor", read_only=True)
-        with Vertical(id="bottom"):
-            yield Input(
-                placeholder="Describe a change and press Enter — the local model makes it",
-                id="task",
-            )
-            yield RichLog(id="log", markup=True, wrap=True)
+            with Vertical(id="editor-area"):
+                yield EditorTabs(id="editor")
+                yield FindBar(id="find")
+        with TabbedContent(id="dock"):
+            with TabPane("Agent", id="tab-agent"):
+                yield Input(
+                    placeholder="Describe a change and press Enter — the local model makes it",
+                    id="task",
+                )
+                yield RichLog(id="log", markup=True, wrap=True)
+                yield ReviewPanel(id="review")
+            with TabPane("Search", id="tab-search"):
+                yield SearchPanel(self._backend, id="search")
         yield Static("starting…", id="status")
         yield Footer()
 
@@ -156,7 +165,7 @@ class LocalCoderApp(App[None]):
         tree.root.expand()
         self.query_one("#task", Input).focus()
 
-    # -- status ------------------------------------------------------------------------
+    # -- status & logging ----------------------------------------------------------------
 
     async def _check_status(self) -> None:
         try:
@@ -173,14 +182,14 @@ class LocalCoderApp(App[None]):
             self._set_status("setup incomplete — see the log")
             return
 
-        model = self._model or (status.tool_capable_models[0] if status.tool_capable_models else "?")
+        model = self._model or (
+            status.tool_capable_models[0] if status.tool_capable_models else "?"
+        )
         self.sub_title = f"{model} · {status.workspace_root or ''}"
         self._set_status("ready")
 
     def _set_status(self, text: str) -> None:
         self.query_one("#status", Static).update(text)
-
-    # -- logging -----------------------------------------------------------------------
 
     @property
     def session_log(self) -> str:
@@ -188,11 +197,6 @@ class LocalCoderApp(App[None]):
         return "\n".join(self._log_lines)
 
     def _log(self, text: str, *, style: str = "") -> None:
-        """Writes one line to the on-screen log, the session record, and the log file.
-
-        `text` is stored without styling so the file and the tests see the same words a
-        person read on screen, not a markup soup.
-        """
         self._log_lines.append(text)
         self.query_one("#log", RichLog).write(f"[{style}]{text}[/]" if style else text)
         if self._log_file is None:
@@ -202,14 +206,12 @@ class LocalCoderApp(App[None]):
             with self._log_file.open("a", encoding="utf-8") as handle:
                 handle.write(f"{datetime.now().isoformat(timespec='seconds')}  {text}\n")
         except OSError:
-            # A log that cannot be written must never take the session down with it; the
-            # on-screen copy is still there.
+            # A log that cannot be written must never take the session down with it.
             self._log_file = None
 
     # -- tree --------------------------------------------------------------------------
 
     async def _populate(self, node: TreeNode[Entry], path: str) -> None:
-        """Fills `node` with one directory's contents, replacing whatever was there."""
         node.remove_children()
         try:
             entries = await self._tree_model.load(path)
@@ -218,9 +220,9 @@ class LocalCoderApp(App[None]):
             return
         for entry in entries:
             if entry.is_dir:
-                # `allow_expand` plus an empty child list is what makes expansion lazy: the
-                # listing for a directory is only fetched when someone opens it, which keeps
-                # startup to a single round trip no matter how deep the tree is.
+                # `allow_expand` with no children is what makes expansion lazy: a directory is
+                # only listed when someone opens it, so startup costs one round trip however
+                # deep the tree is.
                 node.add(f"{entry.name}/", data=entry, allow_expand=True)
             else:
                 node.add_leaf(entry.name, data=entry)
@@ -239,77 +241,155 @@ class LocalCoderApp(App[None]):
         entry = event.node.data
         if not isinstance(entry, Entry) or entry.is_dir:
             return
-        await self._open(entry.path)
+        await self.open_path(entry.path)
 
-    async def _open(self, path: str) -> None:
-        editor = self.query_one("#editor", TextArea)
+    async def open_path(self, path: str, *, line: int | None = None) -> None:
+        """Opens `path` in a tab, optionally putting the cursor on `line` (1-based)."""
+        editor = self.query_one("#editor", EditorTabs)
         try:
             content = await self._backend.read_file(path)
         except AgentError as error:
             self._set_status(explain(error))
             return
 
-        editor.load_text(content.text)
-        language = language_for(path)
-        # Setting an unavailable language raises, and a missing highlighter is a far smaller
-        # problem than a crash while opening a file.
-        try:
-            editor.language = language
-        except Exception:
-            editor.language = None
-
+        await editor.open(content)
+        if line is not None:
+            area = editor.active_area
+            if area is not None:
+                area.cursor_location = (max(line - 1, 0), 0)
         if content.truncated:
-            # Saving now would write back only the part that was read, silently destroying the
-            # rest of the file — so the editor stays read-only until a smaller file is opened.
-            editor.read_only = True
-            self._open_path = None
             self._set_status(f"{path} — truncated at {content.bytes_read} bytes, read-only")
         else:
-            editor.read_only = False
-            self._open_path = path
             self._set_status(path)
 
-    # -- actions -----------------------------------------------------------------------
+    # -- editor ------------------------------------------------------------------------
 
-    def action_focus_task(self) -> None:
-        self.query_one("#task", Input).focus()
+    @on(EditorTabs.ActiveChanged)
+    def _on_active_changed(self, event: EditorTabs.ActiveChanged) -> None:
+        # The find bar edits one TextArea; re-point it whenever the focused tab changes, or a
+        # search would keep operating on a file the user is no longer looking at.
+        editor = self.query_one("#editor", EditorTabs)
+        area = editor.active_area
+        if area is not None:
+            self.query_one("#find", FindBar).attach(area)
+        if event.path:
+            self._set_status(event.path)
+
+    @on(EditorTabs.Dirtied)
+    def _on_dirtied(self, event: EditorTabs.Dirtied) -> None:
+        self._set_status(f"{event.path} — modified")
+
+    def action_toggle_find(self) -> None:
+        find = self.query_one("#find", FindBar)
+        editor = self.query_one("#editor", EditorTabs)
+        area = editor.active_area
+        if area is None:
+            self._set_status("open a file first")
+            return
+        find.attach(area)
+        find.add_class("visible")
+        find.query_one(Input).focus()
+
+    @on(FindBar.Closed)
+    def _on_find_closed(self, _event: FindBar.Closed) -> None:
+        self.query_one("#find", FindBar).remove_class("visible")
+        area = self.query_one("#editor", EditorTabs).active_area
+        if area is not None:
+            area.focus()
+
+    def action_close_tab(self) -> None:
+        editor = self.query_one("#editor", EditorTabs)
+        path = editor.active_path
+        if path is None:
+            return
+        if editor.is_dirty(path):
+            # Deliberately a refusal rather than a prompt: a modal here would be one more
+            # place to lose an edit, and pressing ctrl+s then ctrl+w costs nothing.
+            self._set_status(f"{path} has unsaved changes — ctrl+s first")
+            return
+        editor.close_active()
 
     async def action_save(self) -> None:
-        if self._open_path is None:
+        editor = self.query_one("#editor", EditorTabs)
+        path = editor.active_path
+        text = editor.active_text
+        if path is None or text is None:
             self._set_status("nothing to save")
             return
-        path = self._open_path
         try:
-            await self._backend.write_file(path, self.query_one("#editor", TextArea).text)
+            await self._backend.write_file(path, text)
         except AgentError as error:
             self._set_status(explain(error))
             return
-        self._tree_model.invalidate(str(Path(path).parent).replace("\\", "/").strip("."))
+        editor.mark_saved(path)
+        self._tree_model.invalidate(_parent_of(path))
         self._set_status(f"saved {path}")
 
     async def action_refresh(self) -> None:
         self._tree_model.invalidate_all()
+        self._index.invalidate()
         tree = self.query_one("#tree", Tree)
         await self._populate(tree.root, "")
         tree.root.expand()
         self._set_status("tree refreshed")
 
+    # -- navigation --------------------------------------------------------------------
+
+    def action_find_file(self) -> None:
+        """Opens the fuzzy file finder, mounting it the first time it is asked for.
+
+        Mounted lazily because it builds a full recursive file index on mount, which is a
+        round trip per directory — paying that at startup would delay the first paint for
+        something most sessions never use.
+        """
+        try:
+            finder = self.query_one("#finder", FileFinder)
+        except Exception:
+            finder = FileFinder(self._index, id="finder")
+            self.mount(finder)
+        finder.add_class("visible")
+        finder.query_one(Input).focus()
+
+    @on(FileFinder.Selected)
+    async def _on_file_selected(self, event: FileFinder.Selected) -> None:
+        self._dismiss_finder()
+        await self.open_path(event.path)
+
+    @on(FileFinder.Dismissed)
+    def _on_finder_dismissed(self, _event: FileFinder.Dismissed) -> None:
+        self._dismiss_finder()
+
+    def _dismiss_finder(self) -> None:
+        try:
+            self.query_one("#finder", FileFinder).remove_class("visible")
+        except Exception:
+            return
+        self.query_one("#task", Input).focus()
+
+    @on(SearchPanel.HitSelected)
+    async def _on_hit_selected(self, event: SearchPanel.HitSelected) -> None:
+        await self.open_path(event.path, line=event.line)
+
+    def action_focus_task(self) -> None:
+        self.query_one("#dock", TabbedContent).active = "tab-agent"
+        self.query_one("#task", Input).focus()
+
     # -- delegation --------------------------------------------------------------------
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
-        self.action_run_task()
+        if event.input.id == "task":
+            self.action_run_task()
 
     def action_run_task(self) -> Worker[None] | None:
         """Hands whatever is in the task box to the local model.
 
-        Split out from the Enter-key handler so it can be invoked — by a binding, by a test —
-        without depending on key routing. Textual's headless `run_test()` does not deliver
-        Enter to the focused Input reliably, and a run being unreachable in tests is worse
-        than an extra method.
+        Split out from the Enter handler so it can be driven by a binding or a test without
+        depending on key routing — Textual's headless `run_test()` does not deliver Enter to a
+        focused Input reliably, and a run being unreachable in tests is worse than a method.
 
-        Returns the worker so a caller can await the run. `App.workers.wait_for_complete()`
-        is not a substitute: it resolves against workers already registered, and a run
-        started in the same tick is not registered yet.
+        Returns the worker so a caller can await the run. `App.workers.wait_for_complete()` is
+        not a substitute: it resolves against workers already registered, and one started in
+        the same tick is not registered yet.
         """
         box = self.query_one("#task", Input)
         task = box.value.strip()
@@ -321,20 +401,49 @@ class LocalCoderApp(App[None]):
         box.value = ""
         return self._run_agent(task)
 
+    def _review_candidates(self) -> tuple[str, ...]:
+        """Files worth snapshotting before a run.
+
+        The honest constraint: nothing can know which files a run will touch until it has
+        touched them, and reading a file *after* the run captures the model's own output as
+        the baseline — which would render the diff empty and the revert useless. So the
+        baseline has to be taken in advance, and the only sane scope is what the user has
+        actually looked at: every open tab, plus every file in a directory already listed in
+        the tree. That is bounded by browsing, not by repository size.
+
+        Anything the run touches outside that set is reported by `ReviewSession.problems()`
+        rather than guessed at — guessing a baseline could revert a file over the user's own
+        work.
+        """
+        paths: list[str] = list(self.query_one("#editor", EditorTabs).dirty_paths())
+        paths.extend(
+            entry.path
+            for cached in self._tree_model.cached_listings()
+            for entry in cached
+            if not entry.is_dir
+        )
+        editor = self.query_one("#editor", EditorTabs)
+        if editor.active_path:
+            paths.append(editor.active_path)
+        return tuple(dict.fromkeys(paths))
+
     @work(exclusive=True)
     async def _run_agent(self, task: str) -> None:
-        """Runs the local model and reports every step.
+        """Runs the local model, then routes what it wrote into the review gate.
 
-        A worker rather than an awaited call: a run takes minutes, and anything blocking the
-        event loop for that long would freeze the whole interface, including the log that is
-        supposed to be showing progress.
+        A worker rather than an awaited call: a run takes minutes, and blocking the event loop
+        for that long would freeze the interface — including the log that is meant to show
+        progress.
         """
         self._agent_busy = True
         self._set_status("the local model is working…")
         self._log(f"▸ {task}", style="bold")
+
+        known = self._review_candidates()
+        await self._review.snapshot(known)
+
         started_at = datetime.now()
         started = monotonic()
-
         try:
             run = await self._backend.run_agent(task, model=self._model)
         except AgentError as error:
@@ -357,19 +466,63 @@ class LocalCoderApp(App[None]):
         self._history.record(run, started_at=started_at, duration_s=duration)
         self._agent_busy = False
 
-        # The model wrote directly to disk, so anything cached is stale exactly now. Done
-        # before the summary below, not after: refreshing sets its own status line, and
-        # running it last would replace the outcome of the run with "tree refreshed" — the
-        # one piece of information the user was waiting for.
+        # A path the run touched that was not in the pre-run set never existed, so its
+        # baseline is "absent" — recorded without I/O, since reading it now would pick up the
+        # model's own output.
+        created = [path for path in run.touched_files if path not in known]
+        self._review.mark_absent(created)
+        await self._review.capture(run.touched_files)
+        self._show_review()
+
+        # The model wrote straight to disk, so anything cached is stale exactly now. Done
+        # before the summary because refreshing sets its own status line, and running it last
+        # would replace the run's outcome with "tree refreshed".
         await self.action_refresh()
-        if self._open_path and self._open_path in run.touched_files:
-            await self._open(self._open_path)
 
         self._set_status(
             f"{'done' if run.succeeded else 'stopped'} in {duration:.0f}s · "
             f"{len(run.steps)} tool call(s) · {self._history.succeeded} ok / "
             f"{self._history.failed} failed this session"
         )
+
+    def _show_review(self) -> None:
+        pending = self._review.pending()
+        self.query_one("#review", ReviewPanel).show(pending)
+        for problem in self._review.problems():
+            self._log(problem, style="yellow")
+        self._review.clear_problems()
+        if pending:
+            self.query_one("#dock", TabbedContent).active = "tab-agent"
+            self._log(
+                f"{len(pending)} file(s) awaiting review — n/p to move, a accept, r revert",
+                style="bold",
+            )
+
+    @on(ReviewPanel.Accepted)
+    async def _on_review_accepted(self, event: ReviewPanel.Accepted) -> None:
+        await self._review.accept(event.path)
+        self._log(f"  kept {event.path}", style="green")
+        self._show_review()
+
+    @on(ReviewPanel.Reverted)
+    async def _on_review_reverted(self, event: ReviewPanel.Reverted) -> None:
+        await self._review.revert(event.path)
+        self._log(f"  reverted {event.path}", style="yellow")
+        self._show_review()
+        # The file on disk just changed underneath any open tab; reload it rather than leaving
+        # the editor showing content that is no longer there.
+        editor = self.query_one("#editor", EditorTabs)
+        if event.path in editor.dirty_paths() or editor.active_path == event.path:
+            try:
+                editor.reload(await self._backend.read_file(event.path))
+            except AgentError as error:
+                self._set_status(explain(error))
+        await self.action_refresh()
+
+
+def _parent_of(path: str) -> str:
+    parent = str(Path(path).parent).replace("\\", "/")
+    return "" if parent == "." else parent
 
 
 def main() -> None:
@@ -378,12 +531,9 @@ def main() -> None:
     server = repo_root / "host-bridge" / "dist" / "mcp-main.js"
 
     # One transcript per session, alongside the ones scripts/delegate.mjs writes. A run hands
-    # file-writing authority to a model nobody watched; the terminal scrollback disappears
-    # when the window closes, so this is the durable record of what was asked and what
-    # happened.
-    log_file = (
-        repo_root / "logs" / "ide" / f"{datetime.now().strftime('%Y-%m-%d_%H%M%S')}.txt"
-    )
+    # file-writing authority to a model nobody watched, and terminal scrollback dies with the
+    # window.
+    log_file = repo_root / "logs" / "ide" / f"{datetime.now().strftime('%Y-%m-%d_%H%M%S')}.txt"
 
     async def run() -> None:
         async with McpBackend(server) as backend:
