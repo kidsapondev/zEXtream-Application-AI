@@ -39,6 +39,7 @@ from .protocols import (
     ModelStatus,
     SearchHit,
     StopReason,
+    TokenUsage,
 )
 
 # The handshake is cheap and local; if it has not completed in this long the server is not
@@ -359,6 +360,11 @@ class McpBackend:
 # than silently producing empty step lists.
 # --------------------------------------------------------------------------------------
 
+_TOKENS_RE = re.compile(r"^Tokens:\s*(\d+)\s*in\s*/\s*(\d+)\s*out")
+# Named distinctly from the status report's model pattern further down. Both match a model
+# name, but from two completely different reports, and one silently shadowing the other cost
+# a debugging round — the second definition simply won and the first never matched anything.
+_AGENT_MODEL_RE = re.compile(r"^Local agent \(([^)]+)\)")
 _STEP_RE = re.compile(r"^\s*\d+\.\s+(ok|FAIL)\s+(.*)$")
 _STOPPED_RE = re.compile(r"^Stopped \(([^)]+)\):\s*(.*)$")
 _TURNS_RE = re.compile(r"(\d+)\s+turn")
@@ -378,11 +384,22 @@ def _parse_agent_result(task: str, text: str) -> AgentRun:
     answer_lines: list[str] = []
     in_steps = False
 
+    usage: TokenUsage | None = None
+    model: str | None = None
+
     for line in text.splitlines():
         if line.startswith("Local agent"):
             match = _TURNS_RE.search(line)
             if match:
                 turns = int(match.group(1))
+            named = _AGENT_MODEL_RE.match(line)
+            if named:
+                model = named.group(1)
+            continue
+
+        tokens = _TOKENS_RE.match(line)
+        if tokens:
+            usage = TokenUsage(int(tokens.group(1)), int(tokens.group(2)))
             continue
         if line.strip() == "Steps:":
             in_steps = True
@@ -418,6 +435,8 @@ def _parse_agent_result(task: str, text: str) -> AgentRun:
         stopped=stopped,
         turns=turns,
         error=error,
+        usage=usage,
+        model=model,
     )
 
 

@@ -125,6 +125,30 @@ class AgentStep:
 
 
 @dataclass(frozen=True, slots=True)
+class TokenUsage:
+    """What one run cost the GPU, as Ollama counted it.
+
+    Worth surfacing even though nothing is billed: tokens are the honest measure of how much
+    context a task actually consumed, and on a 16 GB card the input count is what decides
+    whether the model stayed on the card or spilled to the CPU. A run that quietly grew to
+    fill `num_ctx` is the difference between ten tokens a second and three.
+    """
+
+    input_tokens: int
+    output_tokens: int
+
+    @property
+    def total(self) -> int:
+        return self.input_tokens + self.output_tokens
+
+    def __add__(self, other: "TokenUsage") -> "TokenUsage":
+        return TokenUsage(
+            self.input_tokens + other.input_tokens,
+            self.output_tokens + other.output_tokens,
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class AgentRun:
     """The outcome of one `local_code_agent` call.
 
@@ -140,6 +164,12 @@ class AgentRun:
     stopped: StopReason = StopReason.DONE
     turns: int = 0
     error: str | None = None
+    #: `None` when the server did not report counts — meaningfully different from zero, which
+    #: would claim the run was free.
+    usage: TokenUsage | None = None
+    #: Which model actually ran. The caller may not have pinned one, in which case the server
+    #: picked, and the UI has no other way to say what answered.
+    model: str | None = None
 
     @property
     def succeeded(self) -> bool:

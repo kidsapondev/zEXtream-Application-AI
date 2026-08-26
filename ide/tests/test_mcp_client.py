@@ -186,3 +186,45 @@ class TestStatus:
 
         assert status.models == ("qwen2.5-coder:14b", "nomic-embed-text")
         assert status.tool_capable_models == ("qwen2.5-coder:14b",)
+
+
+class TestAgentUsage:
+    """Token counts and the model name, both of which the app shows to the user."""
+
+    REPORT = (
+        "Local agent (qwen2.5-coder:14b) on the workspace root "
+        "— 3 turn(s), 1 tool call(s).\n"
+        "\n"
+        "Steps:\n"
+        "  1. ok   write_file(a.py) -> 12 bytes\n"
+        "\n"
+        "Done.\n"
+        "\n"
+        "Tokens: 3238 in / 1171 out.\n"
+    )
+
+    def test_parses_the_token_counts(self) -> None:
+        run = _parse_agent_result("write a file", self.REPORT)
+
+        assert run.usage is not None
+        assert (run.usage.input_tokens, run.usage.output_tokens) == (3238, 1171)
+        assert run.usage.total == 4409
+
+    def test_parses_the_model_that_actually_ran(self) -> None:
+        # The caller may not have pinned one, in which case the server chose and this line is
+        # the only place that says which.
+        run = _parse_agent_result("write a file", self.REPORT)
+
+        assert run.model == "qwen2.5-coder:14b"
+
+    def test_usage_is_none_when_the_server_reported_no_counts(self) -> None:
+        # Distinct from zero, which would claim the run was free.
+        report = "Local agent (m) on . — 1 turn(s), 0 tool call(s).\n\nHello.\n"
+
+        assert _parse_agent_result("hi", report).usage is None
+
+    def test_the_token_line_does_not_leak_into_the_answer(self) -> None:
+        run = _parse_agent_result("write a file", self.REPORT)
+
+        assert "Tokens:" not in run.answer
+        assert run.answer == "Done."

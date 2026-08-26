@@ -11,10 +11,10 @@ Widget-level behaviour lives in the per-widget test modules. What is tested here
 
 from __future__ import annotations
 
-from textual.widgets import Input, Static, TabbedContent, Tree
+from textual.widgets import Input, Select, Static, TabbedContent, Tree
 
 from local_coder.app import LocalCoderApp
-from local_coder.protocols import AgentRun, AgentStep, ModelStatus, StopReason
+from local_coder.protocols import AgentRun, AgentStep, ModelStatus, StopReason, TokenUsage
 from local_coder.ui.editor_tabs import EditorTabs
 from local_coder.ui.review_panel import ReviewPanel
 
@@ -272,3 +272,83 @@ class TestDock:
             await pilot.pause()
 
             assert dock.active == "tab-agent"
+
+
+class TestModelAndTokens:
+    """Choosing what runs, and seeing what it cost."""
+
+    async def test_the_picker_offers_only_tool_capable_models(self, backend) -> None:
+        # A model without the capability cannot call a workspace tool at all, so offering it
+        # puts a choice in front of the user whose only outcome is a run that touches nothing.
+        backend.status_result = ModelStatus(
+            reachable=True,
+            workspace_configured=True,
+            workspace_root="/w",
+            models=("qwen2.5-coder:14b", "nomic-embed-text"),
+            tool_capable_models=("qwen2.5-coder:14b",),
+        )
+        app = LocalCoderApp(backend)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            offered = [str(label) for label, _value in app.query_one("#model", Select)._options]
+
+            assert "qwen2.5-coder:14b" in offered
+            assert "nomic-embed-text" not in offered
+
+    async def test_it_defaults_to_what_the_server_would_have_picked(self, backend) -> None:
+        # So the box never disagrees with what actually runs.
+        app = LocalCoderApp(backend)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+
+            assert app._model == "qwen2.5-coder:14b"
+
+    async def test_choosing_a_model_is_used_for_the_next_run(self, backend) -> None:
+        backend.status_result = ModelStatus(
+            reachable=True,
+            workspace_configured=True,
+            workspace_root="/w",
+            models=("a:1b", "b:7b"),
+            tool_capable_models=("a:1b", "b:7b"),
+        )
+        app = LocalCoderApp(backend)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app.query_one("#model", Select).value = "b:7b"
+            await pilot.pause()
+            await run_task(app, pilot, "do a thing")
+
+            # run_agent(task, path, model) — the recorded call carries the chosen model.
+            assert backend.called("run_agent")[0][2] == "b:7b"
+
+    async def test_token_counts_are_shown_and_accumulate(self, backend) -> None:
+        backend.agent_result = AgentRun(
+            task="t",
+            answer="done",
+            stopped=StopReason.DONE,
+            turns=2,
+            usage=TokenUsage(1000, 250),
+        )
+        app = LocalCoderApp(backend)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await run_task(app, pilot, "first")
+            after_one = str(app.query_one("#tokens", Static).content)
+            await run_task(app, pilot, "second")
+            after_two = str(app.query_one("#tokens", Static).content)
+
+            assert "1,250" in after_one
+            assert "2,500" in after_two
+            assert "2 run(s)" in after_two
+            # The per-run cost is in the transcript too, since the counter only shows a total.
+            assert "1,250 tokens" in app.session_log
+
+    async def test_a_run_that_reported_no_counts_shows_nothing(self, backend) -> None:
+        # Blank rather than zero: zero would claim the run was free.
+        backend.agent_result = AgentRun(task="t", answer="done", usage=None)
+        app = LocalCoderApp(backend)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await run_task(app, pilot, "first")
+
+            assert str(app.query_one("#tokens", Static).content) == ""

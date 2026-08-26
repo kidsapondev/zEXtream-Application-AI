@@ -32,6 +32,7 @@ from textual.widgets import (
     Static,
     TabbedContent,
     TabPane,
+    Select,
     TextArea,
     Tree,
 )
@@ -45,7 +46,7 @@ from .git import GitRepo
 from .history import RunHistory
 from .lsp import Diagnostic, LspClient, language_id_for
 from .mcp_client import McpBackend
-from .protocols import AgentError, CoderBackend, Entry
+from .protocols import AgentError, CoderBackend, Entry, TokenUsage
 from .review import ReviewSession
 from .runner import Runner
 from .ui.editor_tabs import EditorTabs
@@ -120,6 +121,19 @@ class LocalCoderApp(App[None]):
         background: $surface;
     }
     #dock:focus-within { border-top: solid $primary; }
+
+    /* The model picker and the token counter share one row above the task box: both answer
+       "what am I about to spend, and on what", which is the question you ask right before
+       typing a task, not one you go looking for in a menu. */
+    #agent-bar { height: 3; background: $surface; }
+    #model { width: 32; }
+    #tokens {
+        width: 1fr;
+        height: 3;
+        content-align: right middle;
+        padding: 0 1;
+        color: $text-muted;
+    }
 
     #task {
         border: none;
@@ -203,6 +217,11 @@ class LocalCoderApp(App[None]):
         #: terminal window — which is what `log_file` is for.
         self._log_lines: list[str] = []
         self._log_file = log_file
+        #: Running total for the session. `None` until a run actually reports counts, which is
+        #: not the same as zero — zero would claim the runs so far were free.
+        self._session_usage: TokenUsage | None = None
+        self._session_runs = 0
+        self._workspace_label = ""
 
     # -- layout ------------------------------------------------------------------------
 
@@ -215,6 +234,14 @@ class LocalCoderApp(App[None]):
                 yield FindBar(id="find")
         with TabbedContent(id="dock"):
             with TabPane("Agent", id="tab-agent"):
+                with Horizontal(id="agent-bar"):
+                    yield Select[str](
+                        [],
+                        id="model",
+                        prompt="model…",
+                        allow_blank=True,
+                    )
+                    yield Static("", id="tokens")
                 yield Input(
                     placeholder="Describe a change and press Enter — the local model makes it",
                     id="task",
@@ -323,11 +350,52 @@ class LocalCoderApp(App[None]):
             self._set_status("setup incomplete — see the log")
             return
 
-        model = self._model or (
-            status.tool_capable_models[0] if status.tool_capable_models else "?"
-        )
-        self.sub_title = f"{model} · {status.workspace_root or ''}"
+        # Only tool-capable models are offered. A model without the capability cannot call a
+        # workspace tool at all, so listing it would put a choice in front of the user whose
+        # only possible outcome is a run that touches nothing — and the capability flag is the
+        # one thing about a model that can be known without running it.
+        selector = self.query_one("#model", Select)
+        selector.set_options((name, name) for name in status.tool_capable_models)
+        if self._model in status.tool_capable_models:
+            selector.value = self._model
+        elif status.tool_capable_models:
+            # Mirrors what the server would pick on its own, so the box never disagrees with
+            # what actually runs.
+            self._model = status.tool_capable_models[0]
+            selector.value = self._model
+
+        self._workspace_label = status.workspace_root or ""
+        self.sub_title = f"{self._model or '?'} · {status.workspace_root or ''}"
+        self._render_tokens()
         self._set_status("ready")
+
+    @on(Select.Changed, "#model")
+    def _on_model_changed(self, event: Select.Changed) -> None:
+        # `Select.BLANK` while the options are still being populated; ignoring it keeps the
+        # pinned model rather than clearing it during startup.
+        if event.value is Select.BLANK or not isinstance(event.value, str):
+            return
+        self._model = event.value
+        self.sub_title = f"{self._model} · {self._workspace_label}"
+        self._log(f"model: {self._model}", style="dim")
+
+    def _render_tokens(self) -> None:
+        """Repaints the session token counter.
+
+        Shown even though nothing is billed: tokens are the honest measure of how much context
+        a task consumed, and on a 16 GB card the input count is what decides whether the model
+        stayed on the GPU or spilled to the CPU — the difference between ten tokens a second
+        and three. A run whose input count is climbing toward `num_ctx` is the warning.
+        """
+        widget = self.query_one("#tokens", Static)
+        if self._session_usage is None:
+            widget.update("")
+            return
+        usage = self._session_usage
+        widget.update(
+            f"{usage.total:,} tokens  ({usage.input_tokens:,} in / {usage.output_tokens:,} out)"
+            f"  ·  {self._session_runs} run(s)"
+        )
 
     def _set_status(self, text: str) -> None:
         self.query_one("#status", Static).update(text)
@@ -760,6 +828,19 @@ class LocalCoderApp(App[None]):
             self._log(run.answer, style="dim")
         if run.error:
             self._log(f"stopped ({run.stopped.value}): {run.error}", style="yellow")
+
+        if run.usage is not None:
+            self._session_usage = (
+                run.usage if self._session_usage is None else self._session_usage + run.usage
+            )
+            self._session_runs += 1
+            self._log(
+                f"  {run.model or self._model or 'model'} · {run.usage.total:,} tokens "
+                f"({run.usage.input_tokens:,} in / {run.usage.output_tokens:,} out)"
+                f" · {run.turns} turn(s)",
+                style="dim",
+            )
+            self._render_tokens()
 
         self._history.record(run, started_at=started_at, duration_s=duration)
         self._agent_busy = False
