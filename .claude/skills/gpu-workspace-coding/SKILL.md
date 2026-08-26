@@ -124,6 +124,22 @@ it is much cheaper than writing the module, but it is not zero.
 Two modules have since been delegated successfully with the same recipe (`workspace.py`,
 `history.py`) — both in 3–5 turns, both green on the first independent re-run.
 
+### Malformed JSON — the same silent shape, a different cause
+
+Separate from repetition collapse and more common. Asked to write a Python file,
+`qwen2.5-coder:14b` emitted a perfectly well-formed ```` ```json ```` fence containing a
+`write_file` call whose `content` held a Python `"""docstring"""` — three unescaped double
+quotes, which end the JSON string early and make the whole object unparseable.
+
+Recovery correctly declines it (repairing broken JSON is guesswork, and guessing wrong
+writes a mangled file), so the loop treated 4.8 KB of JSON as the final answer, changed
+nothing, and reported success. `runOllamaAgent` now detects the *intent* — a `"name"` and an
+`"arguments"` key with nothing recoverable — spends a turn telling the model the call was
+invalid and why, and lets it retry twice.
+
+**Delegating anything containing a docstring or embedded quotes is asking for this.** Prefer
+briefs that keep such content small, and always diff the file afterwards.
+
 ### Repetition collapse — the failure that exits 0
 
 `qwen2.5-coder:14b` can fail by *degenerating* rather than by getting the logic wrong: it
@@ -172,6 +188,42 @@ Paid for one at a time; check here before debugging any of them again.
 - **`ListView.index` is not reset by `clear()`** — set it to 0 after repopulating or Enter
   has nothing to act on. And `ListView`'s own `enter` binding only fires when the ListView
   itself is focused.
+- **Naming a widget method `_render` shadows `Widget._render()`** and breaks the compositor.
+  No error at definition; the symptom is `AttributeError: 'coroutine' object has no attribute
+  'render_strips'` during layout. Same class as the `_running` collision.
+- **A `Worker` cannot be awaited.** `await self.some_work_method()` on an `@work` method
+  raises `TypeError: object Worker can't be used in 'await' expression`. Split it: a thin
+  `@work` wrapper plus a plain `async def` body that other code awaits directly.
+- **`@work(exclusive=True)` shares `group="default"`** unless given an explicit `group=`, so
+  every exclusive worker on a widget cancels every other one, not just repeats of itself.
+- **Every `query_one` must be inside the `async with app.run_test()` block.** After it exits
+  the screen is torn down and you get `NoMatches`, which reads exactly like a widget that was
+  never mounted.
+- **`Static(..., markup=False)` for anything rendering source code** — a line containing `[`
+  is otherwise parsed as console markup. `str(Static.content)` round-trips to plain text,
+  which makes it assertable headlessly, unlike `RichLog`.
+- **A widget's `compose` children may not exist when the host's `on_mount` runs.** A public
+  `show()`-style method must compute state unconditionally and guard the drawing behind a
+  flag set in the widget's own `on_mount`.
+- **Nested `Message` subclasses are matched by `isinstance`**, so two related messages must be
+  siblings under a shared base — never parent and child, or the parent's handler fires for
+  both.
+
+### Talking to a language server
+
+`lsp.py` is a second JSON-RPC-over-stdio client, and almost none of `mcp_client.py` transfers:
+
+- **LSP framing is not NDJSON.** It is `Content-Length: N\r\n\r\n{json}`. Copying the newline
+  split hangs at the handshake with no error and no timeout at the transport level.
+- **Use `read(n)`, never `readline()`**, on an asyncio subprocess stream: `readline()` raises
+  `LimitOverrunError` past 64 KiB, which a real completion response exceeds routinely.
+- **The server sends *requests* to the client** (`workspace/configuration`,
+  `client/registerCapability`) and waits for a reply. pyright will not publish diagnostics
+  until answered — a dispatcher handling only notifications and responses hangs somewhere
+  that looks like a slow index.
+- **`filterwarnings = ["error"]` plus asyncio subprocesses**: an unclosed
+  `BaseSubprocessTransport.__del__` emits `ResourceWarning`, which surfaces as an unrelated
+  test failing during GC.
 
 ### Two traps it hit, both silent
 
