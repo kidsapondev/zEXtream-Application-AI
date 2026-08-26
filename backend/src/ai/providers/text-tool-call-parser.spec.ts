@@ -129,3 +129,40 @@ describe('parseTextToolCalls', () => {
     ]);
   });
 });
+
+describe('parseTextToolCalls with the call embedded after prose', () => {
+  it('recovers a call from a json fence that follows an explanation', () => {
+    const text = [
+      'I will read the test file first to see what is required.',
+      '',
+      '```json',
+      '{"name": "read_file", "arguments": {"path": "a.ts"}}',
+      '```',
+    ].join('\n');
+
+    expect(parseTextToolCalls(text, TOOLS)).toEqual([
+      { function: { name: 'read_file', arguments: { path: 'a.ts' } } },
+    ]);
+  });
+
+  it('recovers a call from tool_call tags that follow prose', () => {
+    const text =
+      'Let me check that file.\n<tool_call>\n{"name": "list_files", "arguments": {}}\n</tool_call>';
+
+    expect(parseTextToolCalls(text, TOOLS)).toEqual([
+      { function: { name: 'list_files', arguments: {} } },
+    ]);
+  });
+
+  it('still ignores a fenced JSON answer that is not a tool call', () => {
+    const text = 'Here is the config:\n```json\n{"port": 3000}\n```';
+
+    expect(parseTextToolCalls(text, TOOLS)).toEqual([]);
+  });
+
+  it('ignores a fenced code block that is not JSON at all', () => {
+    const text = 'Here is the fix:\n```ts\nexport const x = 1;\n```';
+
+    expect(parseTextToolCalls(text, TOOLS)).toEqual([]);
+  });
+});

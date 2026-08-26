@@ -104,6 +104,37 @@ export function parseTextToolCalls(
 ): RecoveredToolCall[] {
   if (validNames.size === 0) return [];
 
+  const direct = parseCandidate(text, validNames);
+  if (direct.length > 0) return direct;
+
+  // Nothing at the top level. Models frequently narrate first and *then* emit the call
+  // inside a fence — observed with qwen2.5-coder:14b, which answered with a paragraph of
+  // explanation followed by a ```json block containing a perfectly well-formed call. The
+  // edge-anchored cleaning in parseCandidate cannot see that, so the whole delegation
+  // silently did nothing: the model believed it had called a tool, and no file was written.
+  for (const block of embeddedBlocks(text)) {
+    const calls = parseCandidate(block, validNames);
+    if (calls.length > 0) return calls;
+  }
+  return [];
+}
+
+/** Contents of every fenced block and every `<tool_call>` block, wherever they appear. */
+function embeddedBlocks(text: string): string[] {
+  const blocks: string[] = [];
+  for (const match of text.matchAll(/```(?:[a-zA-Z]+)?\s*\n?([\s\S]*?)```/g)) {
+    if (match[1].trim()) blocks.push(match[1]);
+  }
+  for (const match of text.matchAll(/<tool_call>([\s\S]*?)<\/tool_call>/g)) {
+    if (match[1].trim()) blocks.push(match[1]);
+  }
+  return blocks;
+}
+
+function parseCandidate(
+  text: string,
+  validNames: Set<string>,
+): RecoveredToolCall[] {
   const cleaned = text
     .replace(TOOL_CALL_TAG, '')
     .trim()
