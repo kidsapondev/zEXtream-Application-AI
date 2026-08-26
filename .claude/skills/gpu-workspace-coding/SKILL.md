@@ -140,6 +140,27 @@ the repo already had two tool loops and two copies of the text-tool-call parser,
 would also have meant a third path-containment implementation, which is the one piece that
 cannot afford a second opinion. See `ide/README.md`.
 
+### Textual 8.2.8 field notes
+
+Paid for one at a time; check here before debugging any of them again.
+
+- **`Static` exposes `.content`, not `.renderable`.**
+- **Never name private state `_running` on an `App`** — Textual owns it and sets it True at
+  startup, so the guard is permanently closed and swallows work with no error.
+- **`RichLog.lines` is empty headless.** Keep your own list if a test must assert on output.
+- **A worker started this tick is not yet registered**, so `App.workers.wait_for_complete()`
+  can return before it runs. Return the worker and await that.
+- **`Tab.label` is parsed as markup.** A literal `[ro]` marker silently disappears — it reads
+  as an unknown style tag. Use `(ro)`.
+- **`TabbedContent.add_tab` auto-activates the first pane during the `await`**, before the
+  calling coroutine resumes. Populate your bookkeeping *before* awaiting, or the first tab's
+  activation resolves against state that does not exist yet and `active_path` sticks at None.
+- **`Input` does not bind up/down.** For a filter-box-over-a-list (file finder, palette), put
+  `up`/`down`/`escape` on the *container*; they bubble there while the Input keeps focus.
+- **`ListView.index` is not reset by `clear()`** — set it to 0 after repopulating or Enter
+  has nothing to act on. And `ListView`'s own `enter` binding only fires when the ListView
+  itself is focused.
+
 ### Two traps it hit, both silent
 
 - **`_running` collides with Textual.** `App` already owns that attribute and sets it True
