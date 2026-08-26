@@ -25,6 +25,7 @@ import json
 import os
 import re
 from pathlib import Path
+from collections.abc import Sequence
 from typing import Any, Callable
 
 from .protocols import (
@@ -33,6 +34,7 @@ from .protocols import (
     AgentStep,
     Entry,
     EntryKind,
+    ExecResult,
     FileContent,
     ModelStatus,
     SearchHit,
@@ -49,6 +51,10 @@ _HANDSHAKE_TIMEOUT = 30.0
 _AGENT_TIMEOUT = 900.0
 
 _METADATA_TIMEOUT = 30.0
+
+# A build or a test suite legitimately takes minutes; the host caps it independently with
+# BRIDGE_EXEC_TIMEOUT_MS, so this only has to be the looser of the two.
+_EXEC_TIMEOUT = 600.0
 
 _PROTOCOL_VERSION = "2025-06-18"
 
@@ -307,6 +313,21 @@ class McpBackend:
         )
         return _parse_search(text)
 
+    async def exec(
+        self,
+        command: str,
+        args: Sequence[str] = (),
+        *,
+        cwd: str = "",
+    ) -> ExecResult:
+        arguments: dict[str, Any] = {"command": command, "args": list(args)}
+        if cwd:
+            arguments["cwd"] = _to_posix(cwd)
+        # A command is not a metadata lookup — a test suite or a build legitimately runs for
+        # minutes, so this gets its own, much longer allowance.
+        text = await self._call_tool("local_workspace_exec", arguments, _EXEC_TIMEOUT)
+        return _parse_exec(command, args, text)
+
     async def run_agent(
         self,
         task: str,
@@ -397,6 +418,42 @@ def _parse_agent_result(task: str, text: str) -> AgentRun:
         stopped=stopped,
         turns=turns,
         error=error,
+    )
+
+
+def _parse_exec(command: str, args: Sequence[str], text: str) -> ExecResult:
+    """Reads the fixed report `local_workspace_exec` renders.
+
+    The shape is pinned on the Node side precisely so this can be parsed rather than guessed
+    at — the two stream markers and the `exit:` line are a contract, not prose. Anything the
+    markers do not account for is treated as stdout, so a future extra header line degrades
+    into slightly noisy output instead of a crash.
+    """
+    exit_code: int | None = None
+    timed_out = False
+    stdout_lines: list[str] = []
+    stderr_lines: list[str] = []
+    target = stdout_lines
+
+    for line in text.splitlines():
+        if line.startswith("exit: "):
+            raw = line.removeprefix("exit: ").strip()
+            exit_code = int(raw) if raw.lstrip("-").isdigit() else None
+        elif line.startswith("timed out: "):
+            timed_out = line.removeprefix("timed out: ").strip() == "yes"
+        elif line == "--- stdout ---":
+            target = stdout_lines
+        elif line == "--- stderr ---":
+            target = stderr_lines
+        else:
+            target.append(line)
+
+    return ExecResult(
+        command=" ".join([command, *args]),
+        exit_code=exit_code,
+        stdout="\n".join(stdout_lines).strip("\n"),
+        stderr="\n".join(stderr_lines).strip("\n"),
+        timed_out=timed_out,
     )
 
 

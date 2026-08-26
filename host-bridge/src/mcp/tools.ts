@@ -6,6 +6,8 @@ import {
   runOllamaAgent,
   RunOllamaAgentOptions,
 } from '../agent/ollama-agent';
+import path from 'path';
+import { runProcess } from '../process-runner';
 import { resolveInWorkspace, WorkspaceError, workspaceRelative } from '../workspace';
 import { listDir, readFile, searchText, writeFile } from '../workspace-fs';
 
@@ -31,6 +33,11 @@ import { listDir, readFile, searchText, writeFile } from '../workspace-fs';
 /** Zod raw shape, i.e. what `McpServer.registerTool` wants for `inputSchema`. Aliased
  * locally rather than imported from the SDK's internals so a future SDK reshuffle can't
  * break this file's types. */
+/** Cap on each captured stream. The Express route uses the same figure; this is about
+ * keeping one command's output from dominating a JSON-RPC message, not about the model's
+ * context, so it is generous. */
+const EXEC_OUTPUT_LIMIT = 20_000;
+
 type InputShape = Record<string, z.ZodTypeAny>;
 
 export interface McpTool {
@@ -436,6 +443,96 @@ export function createMcpTools(deps: McpToolDeps): McpTool[] {
     },
   };
 
+  /**
+   * Runs one allowlisted command in the sandbox.
+   *
+   * `local_code_agent` has been able to do this all along, but only from inside its own loop —
+   * a client had no way to run `git status` or a test suite on its own behalf. That gap is
+   * what kept the workbench's git and run panels impossible: both are nothing but structured
+   * command output.
+   *
+   * The safety rules are deliberately identical to the agent's `run_command`, and for the same
+   * reasons: a bare command name only (an absolute path or one containing a separator would
+   * let a caller name any executable on disk and step around the allowlist entirely), no
+   * shell (so metacharacters in the arguments stay inert data rather than becoming a second
+   * command), a cwd resolved through the workspace sandbox, and a hard timeout.
+   *
+   * The output shape below is parsed by clients, so it is fixed rather than prose: the exit
+   * code and the stream markers must stay exactly as written.
+   */
+  const localWorkspaceExec: McpTool = {
+    name: 'local_workspace_exec',
+    config: {
+      title: 'Run an allowlisted command in the local workspace',
+      description:
+        'Run one command from BRIDGE_EXEC_ALLOWLIST inside the sandboxed workspace folder ' +
+        'and return its exit code, stdout and stderr. Bare command names only — no shell, ' +
+        'no pipes, no redirection. Use local_model_status to see which commands are allowed.',
+      inputSchema: {
+        command: z
+          .string()
+          .describe('Bare command name, e.g. "git" or "python". Not a path.'),
+        args: z.array(z.string()).optional().describe('Arguments, already split.'),
+        cwd: z
+          .string()
+          .optional()
+          .describe('Directory relative to the workspace root. Omit for the root.'),
+      },
+    },
+    handler: async (args) => {
+      const workspaceRoot = root();
+      if (!workspaceRoot) return errorResult(NOT_CONFIGURED);
+
+      const command = asNonEmptyString(args.command);
+      if (command === undefined) {
+        return errorResult('local_workspace_exec requires a non-empty "command" argument.');
+      }
+      if (command.includes('/') || command.includes('\\') || path.isAbsolute(command)) {
+        return errorResult('local_workspace_exec requires a bare command name, not a path.');
+      }
+      if (deps.execAllowlist.length === 0) {
+        return errorResult(
+          'Command execution is disabled: no commands are allowlisted. Set ' +
+            'BRIDGE_EXEC_ALLOWLIST in host-bridge/.env to enable it.',
+        );
+      }
+      if (!deps.execAllowlist.includes(command.toLowerCase())) {
+        return errorResult(
+          `"${command}" is not on the exec allowlist (${deps.execAllowlist.join(', ')}).`,
+        );
+      }
+
+      const commandArgs = Array.isArray(args.args)
+        ? args.args.filter((entry): entry is string => typeof entry === 'string')
+        : [];
+      const relCwd = asNonEmptyString(args.cwd) ?? '.';
+
+      try {
+        const resolvedCwd = await resolveInWorkspace(workspaceRoot, relCwd);
+        const result = await runProcess(
+          command,
+          commandArgs,
+          resolvedCwd,
+          deps.execTimeoutMs,
+        );
+        const stdout = result.stdout.slice(0, EXEC_OUTPUT_LIMIT);
+        const stderr = result.stderr.slice(0, EXEC_OUTPUT_LIMIT);
+        return textResult(
+          [
+            `exit: ${result.code ?? 'none'}`,
+            `timed out: ${result.timedOut ? 'yes' : 'no'}`,
+            '--- stdout ---',
+            stdout,
+            '--- stderr ---',
+            stderr,
+          ].join('\n'),
+        );
+      } catch (err) {
+        return errorResult(`Could not run "${command}": ${describeError(err)}`);
+      }
+    },
+  };
+
   const localModelStatus: McpTool = {
     name: 'local_model_status',
     config: {
@@ -527,6 +624,7 @@ export function createMcpTools(deps: McpToolDeps): McpTool[] {
     localWorkspaceWrite,
     localWorkspaceList,
     localWorkspaceSearch,
+    localWorkspaceExec,
     localModelStatus,
   ];
 }

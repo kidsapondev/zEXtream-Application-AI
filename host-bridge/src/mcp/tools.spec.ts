@@ -51,15 +51,89 @@ describe('createMcpTools', () => {
     rmSync(root, { recursive: true, force: true });
   });
 
-  it('exposes exactly the six documented tool names', () => {
+  it('exposes exactly the documented tool names', () => {
+    // Pinned deliberately: these names are a published contract. Every IDE config in the
+    // docs, the delegate CLI and the Python client all address tools by name, so adding or
+    // renaming one is a breaking change that should have to be made on purpose.
     expect(createMcpTools(deps()).map((tool) => tool.name)).toEqual([
       'local_code_agent',
       'local_workspace_read',
       'local_workspace_write',
       'local_workspace_list',
       'local_workspace_search',
+      'local_workspace_exec',
       'local_model_status',
     ]);
+  });
+
+  describe('local_workspace_exec', () => {
+    const exec = (overrides: Partial<McpToolDeps> = {}) =>
+      createMcpTools(deps(overrides)).find((tool) => tool.name === 'local_workspace_exec')!;
+
+    it('runs an allowlisted command and reports its exit code and streams', async () => {
+      // `node` rather than a shell builtin: it is guaranteed present (this package runs on
+      // it) and it exercises a real spawn without a shell.
+      const result = await exec({ execAllowlist: ['node'] }).handler({
+        command: 'node',
+        args: ['-e', 'console.log("hi"); console.error("problem")'],
+      });
+
+      const text = (result.content[0] as { text: string }).text;
+      expect(result.isError).toBeFalsy();
+      expect(text).toContain('exit: 0');
+      expect(text).toContain('timed out: no');
+      expect(text).toContain('hi');
+      expect(text).toContain('problem');
+    });
+
+    it('reports a non-zero exit as a result, not as an error', async () => {
+      // A command that fails is a fact the caller wants, not a tool failure — a test suite
+      // exiting 1 is the normal case a run panel exists to show.
+      const result = await exec({ execAllowlist: ['node'] }).handler({
+        command: 'node',
+        args: ['-e', 'process.exit(3)'],
+      });
+
+      expect(result.isError).toBeFalsy();
+      expect((result.content[0] as { text: string }).text).toContain('exit: 3');
+    });
+
+    it('refuses a command that is not on the allowlist', async () => {
+      const result = await exec({ execAllowlist: ['git'] }).handler({ command: 'node' });
+
+      expect(result.isError).toBe(true);
+      expect((result.content[0] as { text: string }).text).toContain('not on the exec allowlist');
+    });
+
+    it('says exec is disabled, not "not allowed", when the allowlist is empty', async () => {
+      // The two need different fixes from the operator; collapsing them sends the user
+      // hunting for the wrong setting.
+      const result = await exec({ execAllowlist: [] }).handler({ command: 'git' });
+
+      expect(result.isError).toBe(true);
+      expect((result.content[0] as { text: string }).text).toContain('disabled');
+    });
+
+    it('refuses a path-qualified command', async () => {
+      // Otherwise an absolute path names any executable on disk and steps around the
+      // allowlist entirely.
+      for (const command of ['C:\\Windows\\System32\\cmd.exe', './node', 'bin/node']) {
+        const result = await exec({ execAllowlist: ['node'] }).handler({ command });
+
+        expect(result.isError).toBe(true);
+        expect((result.content[0] as { text: string }).text).toContain('bare command name');
+      }
+    });
+
+    it('refuses a cwd outside the workspace', async () => {
+      const result = await exec({ execAllowlist: ['node'] }).handler({
+        command: 'node',
+        args: ['-e', ''],
+        cwd: '../..',
+      });
+
+      expect(result.isError).toBe(true);
+    });
   });
 
   describe('when BRIDGE_WORKSPACE_ROOT is unset', () => {

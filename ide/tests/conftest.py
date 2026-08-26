@@ -13,6 +13,8 @@ widget test can assert on what the UI did without anything real happening.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 import pytest
 
 from local_coder.protocols import (
@@ -22,6 +24,7 @@ from local_coder.protocols import (
     CoderBackend,
     Entry,
     EntryKind,
+    ExecResult,
     FileContent,
     ModelStatus,
     SearchHit,
@@ -48,6 +51,7 @@ class FakeBackend:
         # error paths that are otherwise unreachable without breaking something real.
         self.fail_with: AgentError | None = None
         self.agent_result: AgentRun | None = None
+        self.exec_result: ExecResult | None = None
         self.status_result: ModelStatus | None = None
 
     def _record(self, name: str, *args: object) -> None:
@@ -120,6 +124,24 @@ class FakeBackend:
                 if query.lower() in line.lower():
                     hits.append(SearchHit(file_path, number, line))
         return tuple(hits)
+
+    async def exec(
+        self,
+        command: str,
+        args: Sequence[str] = (),
+        *,
+        cwd: str = "",
+    ) -> ExecResult:
+        self._record("exec", command, tuple(args), cwd)
+        if self.exec_result is not None:
+            return self.exec_result
+        return ExecResult(
+            command=" ".join([command, *args]),
+            exit_code=0,
+            stdout="",
+            stderr="",
+            timed_out=False,
+        )
 
     async def run_agent(
         self,

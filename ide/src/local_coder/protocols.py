@@ -76,6 +76,29 @@ class SearchHit:
     text: str
 
 
+@dataclass(frozen=True, slots=True)
+class ExecResult:
+    """One finished command.
+
+    A non-zero `exit_code` is data, not a failure: a test suite exiting 1 is precisely what a
+    run panel exists to display, and raising on it would force every caller to catch an
+    exception to read a number. Only an inability to *run* the command at all raises.
+
+    `exit_code` is `None` when the process was killed rather than exiting on its own — the
+    `timed_out` case, and the reason the two are separate fields.
+    """
+
+    command: str
+    exit_code: int | None
+    stdout: str
+    stderr: str
+    timed_out: bool
+
+    @property
+    def ok(self) -> bool:
+        return self.exit_code == 0 and not self.timed_out
+
+
 # --------------------------------------------------------------------------------------
 # Agent runs
 # --------------------------------------------------------------------------------------
@@ -195,6 +218,22 @@ class CoderBackend(Protocol):
     async def write_file(self, path: str, text: str) -> None: ...
 
     async def search(self, query: str, path: str = "") -> tuple[SearchHit, ...]: ...
+
+    async def exec(
+        self,
+        command: str,
+        args: Sequence[str] = (),
+        *,
+        cwd: str = "",
+    ) -> ExecResult:
+        """Runs one allowlisted command inside the sandbox.
+
+        Deliberately not a general "run anything": the far side accepts a bare command name
+        only, matched against an operator-controlled allowlist, and spawns it without a shell.
+        That is what lets a git panel and a test runner exist without handing the app — or a
+        model driving it — arbitrary code execution on the user's machine.
+        """
+        ...
 
     async def run_agent(
         self,
