@@ -26,8 +26,12 @@ text-tool-call recovery ถูกใช้ซ้ำทั้งหมด รา�
 
 ```
 pnpm --filter host-bridge build
-python -m pip install --user textual==8.2.8
+cd ide
+python -m pip install --user -e .
 ```
+
+การติดตั้งแบบ `-e` จำเป็น ไม่ใช่ทางเลือก — package อยู่ใน `src/` ถ้าไม่ติดตั้ง
+`python -m local_coder` จะหาไม่เจอ (ส่วน `pythonpath` ใน `pyproject.toml` ใช้กับ pytest เท่านั้น)
 
 ตั้งค่า sandbox ใน `host-bridge/.env` (แอปอ่านไฟล์นี้เอง ไม่ต้องตั้ง env ในเชลล์):
 
@@ -38,6 +42,11 @@ MCP_AGENT_MODEL=qwen2.5-coder:14b
 ```
 
 ## รัน
+
+ดับเบิลคลิก **`local-coder.bat`** ที่ root ของ repo — ตัวมันจะตรวจ Python, MCP server ที่ build แล้ว,
+`host-bridge/.env` และ Ollama ให้ก่อน แล้วบอกวิธีแก้ถ้าขาดอะไร
+
+หรือรันเองจากเชลล์:
 
 ```
 cd ide
