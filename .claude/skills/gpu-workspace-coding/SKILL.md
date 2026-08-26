@@ -124,6 +124,18 @@ it is much cheaper than writing the module, but it is not zero.
 Two modules have since been delegated successfully with the same recipe (`workspace.py`,
 `history.py`) — both in 3–5 turns, both green on the first independent re-run.
 
+### Repetition collapse — the failure that exits 0
+
+`qwen2.5-coder:14b` can fail by *degenerating* rather than by getting the logic wrong: it
+emits one enormous unterminated text tool call — one observed case was a ~20 KB `write_file`
+blob whose `content` repeated `"tuple from typing import Tuple\ndefaultdict from collections
+import defaultdict"` hundreds of times. The call never closes, so text recovery never fires,
+the report reads `1 turn(s), 0 tool call(s)` — and **`delegate.mjs` still exits 0**.
+
+Exit status is not a success signal. Check that the file actually changed. The same signature
+once landed in a file that was kept: two stray bare-word lines (`tuple`, `type`) sitting at
+import level in a delegated module, which parsed and passed its tests.
+
 ### Logging
 
 Every delegation writes a transcript. `scripts/delegate.mjs` writes `logs/delegate/<run>.txt`
