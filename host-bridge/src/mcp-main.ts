@@ -1,5 +1,8 @@
-import path from 'path';
-import { config as loadDotenv } from 'dotenv';
+// MUST be the first import. This package compiles to CommonJS, where every `require` an
+// import produces runs before any statement in this module's body — so a dotenv call written
+// below the imports would run after `./mcp/server` has already pulled in `./config`, which
+// reads `process.env` as it evaluates. See load-env.ts for the failure that caused.
+import './load-env';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { createMcpServer } from './mcp/server';
 
@@ -16,19 +19,10 @@ import { createMcpServer } from './mcp/server';
  * the actual cause. So: nothing in this process may write to stdout except the transport.
  * Diagnostics go to stderr, which IDEs capture and show as the server's log.
  *
- * The dotenv call below is the concrete instance of that trap: dotenv v17 prints an
- * "injected env (N) from .env" banner to **console.log** by default, which would break
- * every session before the first request. `quiet: true` is load-bearing, not tidiness.
+ * Loading the `.env` file is the concrete instance of that trap — dotenv v17 announces
+ * itself on **console.log** — which is one of two reasons that load lives in `./load-env`
+ * rather than here. The other is import ordering; see that module.
  */
-
-// Explicit path rather than dotenv's default `process.cwd()/.env`: the IDE chooses this
-// process's working directory (usually the folder the user has open, not this package), so
-// a cwd-relative lookup would silently find nothing and leave BRIDGE_WORKSPACE_ROOT unset.
-// `__dirname` is `host-bridge/dist` at runtime, so `..` is the package root — the same
-// `host-bridge/.env` the Express server reads and the docs tell users to edit.
-// dotenv does not override variables already present in the environment, so an IDE that
-// sets them in its own MCP config still wins.
-loadDotenv({ path: path.resolve(__dirname, '..', '.env'), quiet: true });
 
 async function main(): Promise<void> {
   const server = createMcpServer();

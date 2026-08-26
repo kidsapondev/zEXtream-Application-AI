@@ -114,6 +114,13 @@ class McpBackend:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 env=env,
+                # The server loads its configuration with `dotenv/config`, which resolves
+                # `.env` against the *working directory*, not the script. Launched from
+                # anywhere else it silently finds the wrong file — or none — and then reports
+                # a perfectly clear "workspace not configured" for a workspace that is in fact
+                # configured. Pinning the cwd to the host-bridge package is what makes
+                # `host-bridge/.env` the file it actually reads.
+                cwd=str(self._script.parent.parent),
             )
         except FileNotFoundError as exc:
             raise AgentError(

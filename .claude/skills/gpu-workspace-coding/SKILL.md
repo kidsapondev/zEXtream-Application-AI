@@ -121,6 +121,37 @@ The delegated module needed a cleanup pass afterwards: correct logic, but three 
 imports and docstrings that were verbatim copies of the task text. Budget for that review;
 it is much cheaper than writing the module, but it is not zero.
 
+Two modules have since been delegated successfully with the same recipe (`workspace.py`,
+`history.py`) — both in 3–5 turns, both green on the first independent re-run.
+
+### Logging
+
+Every delegation writes a transcript. `scripts/delegate.mjs` writes `logs/delegate/<run>.txt`
+plus a one-line-per-run `index.txt`; the Textual app writes `logs/ide/<session>.txt`. Both are
+gitignored. This is not debug output — a run hands file-writing authority to a model nobody is
+watching, and terminal scrollback dies with the window. When a file turns out to be wrong days
+later, the transcript is what says whether a model wrote it and under what instruction.
+
+## The third entry point: `ide/`
+
+A Textual terminal IDE (`python -m local_coder`) that is an **MCP client** — it spawns the
+same `mcp-main.js` rather than reimplementing anything. That was the load-bearing decision:
+the repo already had two tool loops and two copies of the text-tool-call parser, and a third
+would also have meant a third path-containment implementation, which is the one piece that
+cannot afford a second opinion. See `ide/README.md`.
+
+### Two traps it hit, both silent
+
+- **`_running` collides with Textual.** `App` already owns that attribute and sets it True
+  when the app loop starts, so a guard named `self._running` is permanently true and swallows
+  every run without an error. Name private state distinctively in an `App` subclass.
+- **dotenv ran after the imports that read env.** `mcp-main.ts` called `loadDotenv(...)` below
+  its import block; this package compiles to CommonJS, where the `require`s hoisted from those
+  imports run first, so `config.ts` captured an empty environment. It worked only when the
+  launcher supplied the variables itself (an IDE's `--env`, or `delegate.mjs`), and reported
+  "workspace not configured" for a correctly configured workspace otherwise. The load now
+  lives in `host-bridge/src/load-env.ts`, imported first.
+
 MCP servers load at session start, so a newly registered server is not callable in the
 session that registered it.
 

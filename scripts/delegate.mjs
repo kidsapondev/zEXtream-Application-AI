@@ -15,7 +15,7 @@
 // dependency to the repo root's package.json.
 
 import { spawn } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -272,6 +272,71 @@ function isUnsuccessful(result, renderedText) {
   return /^Stopped \(/m.test(renderedText);
 }
 
+/**
+ * Every delegation is written to a plain-text transcript under `logs/delegate/`.
+ *
+ * This is not debug output. A run hands file-writing authority to a model nobody is
+ * watching, and the terminal that showed what it did is gone as soon as the window closes —
+ * so the transcript is the only durable record of which model was asked what, which tools it
+ * called, and whether it finished. When a file turns out to be wrong three days later, this
+ * is what says whether a model wrote it and under what instruction.
+ *
+ * `.txt`, not JSON: it is meant to be opened and read, including by someone who is not going
+ * to pipe it through a parser first. `index.txt` gets one line per run so the directory can
+ * be skimmed without opening anything.
+ */
+const LOG_DIR = path.join(REPO_ROOT, 'logs', 'delegate');
+
+function timestampSlug(date) {
+  const pad = (value) => String(value).padStart(2, '0');
+  return (
+    `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}` +
+    `_${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`
+  );
+}
+
+function writeRunLog({ toolName, toolArgs, model, startedAt, durationMs, rendered, failed }) {
+  try {
+    mkdirSync(LOG_DIR, { recursive: true });
+    // The model is only known here when it was pinned on the command line; otherwise the
+    // server picks it, and the rendered result names it in its first line.
+    const modelSlug = (model ?? 'auto').replace(/[^a-zA-Z0-9._-]/g, '-');
+    const slug = timestampSlug(startedAt);
+    const file = path.join(LOG_DIR, `${slug}_${toolName}_${modelSlug}.txt`);
+
+    const body = [
+      `run          : ${slug}`,
+      `tool         : ${toolName}`,
+      `model        : ${model ?? '(server default / auto-picked)'}`,
+      `started      : ${startedAt.toISOString()}`,
+      `duration     : ${(durationMs / 1000).toFixed(1)}s`,
+      `outcome      : ${failed ? 'FAILED' : 'ok'}`,
+      `workspace    : ${process.env.BRIDGE_WORKSPACE_ROOT ?? '(unset)'}`,
+      '',
+      '--- task ---',
+      typeof toolArgs.task === 'string' ? toolArgs.task : '(none)',
+      '',
+      '--- result ---',
+      rendered,
+      '',
+    ].join('\n');
+
+    writeFileSync(file, body, 'utf8');
+    appendFileSync(
+      path.join(LOG_DIR, 'index.txt'),
+      `${slug}  ${failed ? 'FAIL' : 'ok  '}  ${(durationMs / 1000).toFixed(0)}s  ` +
+        `${(model ?? 'auto').padEnd(20)}  ${path.basename(file)}\n`,
+      'utf8',
+    );
+    return file;
+  } catch (err) {
+    // Never let logging break a run that otherwise worked — the result on stdout is the
+    // thing the caller asked for.
+    process.stderr.write(`delegate: could not write log (${err.message})\n`);
+    return null;
+  }
+}
+
 async function main() {
   const opts = parseArgs(process.argv.slice(2));
 
@@ -408,15 +473,32 @@ async function main() {
         // only starts accepting `tools/call` after it arrives.
         rpc.notify('notifications/initialized', {});
 
+        const startedAt = new Date();
+        const startedMs = Date.now();
         const result = await rpc.request('tools/call', { name: toolName, arguments: toolArgs });
+        const rendered = renderResult(result);
+        const failed = isUnsuccessful(result, rendered);
 
         if (opts.json) {
           process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
         } else {
-          process.stdout.write(`${renderResult(result)}\n`);
+          process.stdout.write(`${rendered}\n`);
         }
 
-        process.exitCode = isUnsuccessful(result, renderResult(result)) ? 1 : 0;
+        const logFile = writeRunLog({
+          toolName,
+          toolArgs,
+          model: opts.model,
+          startedAt,
+          durationMs: Date.now() - startedMs,
+          rendered,
+          failed,
+        });
+        if (logFile) {
+          process.stderr.write(`delegate: log written to ${path.relative(REPO_ROOT, logFile)}\n`);
+        }
+
+        process.exitCode = failed ? 1 : 0;
       })(),
       timeoutPromise,
     ]);

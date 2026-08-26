@@ -30,3 +30,7 @@ ide/.venv/
 __pycache__/
 *.py[cod]
 .pytest_cache/
+
+# Delegation transcripts - a machine-local record of what the local model was asked to do
+# and what it did. Kept out of git: they are per-machine history, not project source.
+logs/
