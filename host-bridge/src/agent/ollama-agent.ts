@@ -73,6 +73,22 @@ export interface RunOllamaAgentOptions {
 export const MAX_AGENT_TURNS = 20;
 
 /**
+ * Context window requested per turn, in tokens. Sending this at all is the point: without an
+ * explicit `num_ctx`, Ollama uses whatever the *model* defaults to, and those defaults are
+ * wildly inconsistent — measured on a 16 GB card, `devstral:24b` defaults to 131072, whose KV
+ * cache alone pushed the resident footprint to 36 GB and forced a 61%/39% CPU/GPU split.
+ * Generation ran at roughly 2.7 tokens/second. Pinning this value dropped the same model to
+ * 17 GB and a 17%/83% split, about four times faster, with no change to the task.
+ *
+ * The number is a budget, not a preference: it has to hold the system prompt and tool
+ * schemas (~1.5k), a source file the model was asked to read (commonly 5-8k), and several
+ * turns of tool results, while leaving the weights room to stay on the card. Raising it costs
+ * VRAM quadratically in the worst case and will silently push a large model back onto the
+ * CPU — check `ollama ps` after any change here, not just the wall clock.
+ */
+export const AGENT_NUM_CTX = Number(process.env.OLLAMA_NUM_CTX ?? 16_384);
+
+/**
  * Time Ollama is allowed to take before it starts answering. Matches
  * `OLLAMA_CONNECT_TIMEOUT_MS` in the backend provider, and for the same measured reason:
  * Ollama only loads a model into RAM/VRAM on its first request (or after an idle unload),
@@ -785,6 +801,7 @@ async function chatOnce(
         // Request/response, not a stream: the MCP caller is blocked on one `tools/call`
         // and has nowhere to put incremental tokens. See the module doc comment.
         stream: false,
+        options: { num_ctx: AGENT_NUM_CTX },
       }),
       signal: combined,
     });

@@ -53,9 +53,73 @@ anything where the spec is the hard part.
 2. **One concrete step per call.** "Add field `x` to interface `Y` and update every call
    site" works. "Implement auth" does not.
 3. **Name the files.** The local model wastes turns exploring; `path` narrows its root.
-4. **Review the diff, not the transcript.** `git diff --stat` then read only what changed.
-5. **Re-delegate, don't argue.** If the result is wrong, `git checkout` and reissue a
-   sharper task — a 14B model rarely recovers through discussion.
+4. **Write the test first — and prove it is satisfiable.** A delegated task is only as good
+   as the test waiting for it. Run the suite yourself against a stub before handing it over.
+5. **Review the diff, not the transcript.** `git diff --stat` then read only what changed.
+6. **Re-delegate, don't argue.** If the result is wrong, `git checkout` and reissue a
+   sharper task — a small model rarely recovers through discussion.
+
+Drive it from any shell with `node scripts/delegate.mjs "<task>"` (see `scripts/README.md`).
+An MCP server is only callable once an IDE session starts with it already registered, so the
+session that registers it cannot use it — that CLI is the way around that.
+
+### What went wrong the first time, measured
+
+The first real delegation (implement a module against an existing pytest file) failed, and
+both causes are worth knowing:
+
+- **The turn cap was too low.** A test-driven loop costs *two* turns per attempt —
+  `write_file`, then `run_command pytest` — plus the initial reads. The old cap of 8 bought
+  three attempts and cut the run off mid-convergence, not because the model was stuck.
+  `MAX_AGENT_TURNS` is now 20 for the MCP loop.
+- **The brief was impossible.** Two tests in the spec contradicted each other: one forbade
+  any line text starting with `@@`, another required the header line to start with `@@`. No
+  model could have passed both. **Run the spec yourself before delegating it.**
+
+What the model actually produced is the useful signal: structure correct (enum, frozen
+dataclass, right stdlib call, markers stripped), algorithm wrong (it parsed line numbers out
+of each line's *content* instead of counting forward from the hunk header). That is the
+characteristic small-model failure — plausible shape, broken reasoning — and it is exactly
+what a waiting test catches and a code review of the transcript would not.
+
+### Choosing the model
+
+`/api/tags` reporting the `tools` capability is necessary and not sufficient — see the trap
+below. Real weight sizes from the Ollama registry, against a 16 GB card:
+
+| Model | Weights | Fits 16 GB? | Notes |
+|---|---|---|---|
+| `qwen2.5-coder:14b` | 8.4 GB | yes, easily | Trained for completion/FIM, not agentic loops |
+| `devstral:24b` | 13.3 GB | yes, with context headroom | Mistral, built specifically for tool-loop coding |
+| `qwen2.5-coder:32b` | 18.5 GB | no — spills to CPU | Strongest of the three, and much slower here |
+
+There is no `qwen2.5-coder:24b`; that line is 0.5/1.5/3/7/14/32b only. Pin the choice with
+`MCP_AGENT_MODEL` in `host-bridge/.env` — auto-pick takes the *first* tool-capable model
+Ollama lists, which is not the best one.
+
+**Always set `num_ctx`.** Without it Ollama uses the *model's* default, and those defaults
+vary enormously. Measured: `devstral:24b` defaults to 131072, whose KV cache took the
+resident footprint to 36 GB and forced a 61%/39% CPU/GPU split at ~2.7 tok/s. Pinning 16384
+gave 17 GB, 17%/83%, and ~10.4 tok/s — four times faster, same task. Both loops now send it
+(`AGENT_NUM_CTX`, `OLLAMA_NUM_CTX`). After changing it, check `ollama ps`, not the clock:
+the split is the number that matters.
+
+**Head-to-head on the same task** (implement a module against an existing pytest file):
+
+| Model | Result |
+|---|---|
+| `qwen2.5-coder:14b` | **Passed.** 5 turns: read spec, read protocols, write, run pytest, green. |
+| `devstral:24b` | Failed differently — read both files, wrote a plan, then *ended its turn* without ever calling `write_file`. |
+
+So the bigger, agentic-branded model lost. `devstral` also refuses tool use entirely unless a
+system prompt establishes that it has file access (it answers "I can't read files"); with one,
+it emits proper structured `tool_calls`, which qwen never does. Neither fact predicted which
+one would finish the job. **Benchmark on your actual task before switching** — capability
+flags, parameter count, and marketing all failed to.
+
+The delegated module needed a cleanup pass afterwards: correct logic, but three unused
+imports and docstrings that were verbatim copies of the task text. Budget for that review;
+it is much cheaper than writing the module, but it is not zero.
 
 MCP servers load at session start, so a newly registered server is not callable in the
 session that registered it.

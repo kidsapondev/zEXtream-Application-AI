@@ -71,6 +71,14 @@ export const OLLAMA_STREAM_INACTIVITY_TIMEOUT_MS = 30_000;
 export const MAX_TOOL_TURNS = 8;
 
 /**
+ * Context window requested per request, in tokens. See the comment at the call site for the
+ * measurements behind it. Deliberately a constant rather than an env var: it is a property
+ * of the GPU this deployment runs on, not of the environment, and a value large enough to
+ * matter here would already have pushed the model off the card.
+ */
+export const OLLAMA_NUM_CTX = 16_384;
+
+/**
  * One turn's worth of events. `tool-call` never reaches the gateway — `streamChat`
  * consumes it, runs the tool, and feeds the result back into the next turn; only the
  * three `AiStreamEvent` variants are forwarded upstream.
@@ -302,6 +310,15 @@ export class OllamaProvider implements AiProvider {
               stream: true,
               options: {
                 temperature: request.temperature,
+                // Sent explicitly because Ollama otherwise uses the *model's* default
+                // context window, and those defaults vary enormously. Measured on a 16 GB
+                // card: devstral:24b defaults to 131072, whose KV cache alone took the
+                // resident footprint to 36 GB and forced a 61%/39% CPU/GPU split at about
+                // 2.7 tokens/second. Pinning it gave 17 GB, a 17%/83% split, and roughly
+                // four times the throughput. Without this, swapping in a long-context model
+                // silently makes every chat crawl. Kept in step with `AGENT_NUM_CTX` in
+                // host-bridge's ollama-agent.ts — the two loops share one GPU.
+                num_ctx: OLLAMA_NUM_CTX,
               },
             }),
             signal: combinedSignal,
