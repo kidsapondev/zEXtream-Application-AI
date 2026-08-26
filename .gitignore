@@ -24,3 +24,9 @@ postgres-data/
 /e2e/playwright-report/
 /e2e/blob-report/
 /e2e/.last-run.json
+
+# Python IDE (ide/) - virtualenvs, bytecode and test caches
+ide/.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/

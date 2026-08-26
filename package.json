@@ -14,6 +14,7 @@
     "test:e2e": "pnpm --filter backend test:e2e",
     "test:e2e:browser": "pnpm --filter e2e test:e2e:browser",
     "lint": "pnpm --filter backend exec eslint \"{src,apps,libs,test}/**/*.ts\"",
-    "check": "pnpm run build && pnpm run test && pnpm run lint"
+    "check": "pnpm run build && pnpm run test && pnpm run lint",
+    "delegate": "node scripts/delegate.mjs"
   }
 }

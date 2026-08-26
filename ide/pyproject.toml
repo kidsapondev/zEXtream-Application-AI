@@ -1,0 +1,44 @@
+[project]
+name = "local-coder"
+version = "0.1.0"
+description = "Terminal IDE that delegates code writing to a locally-hosted model on this machine's GPU"
+requires-python = ">=3.13"
+
+# Pinned exactly, not to a caret range. Two reasons, both specific to how this package gets
+# written: most modules here are produced by a locally-hosted 14B model, which learned an
+# older Textual whose imports have since moved, so a floating version would let a delegated
+# file compile against docs the model half-remembers and fail at runtime. And Textual's API
+# has churned across majors — an unpinned upgrade would break widgets nobody is actively
+# maintaining. Versions below are the ones actually resolved and installed on this machine,
+# not the latest published.
+dependencies = [
+    "textual==8.2.8",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==9.1.1",
+    "pytest-asyncio==1.4.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/local_coder"]
+
+[tool.pytest.ini_options]
+# `pythonpath` means the suite runs straight from a checkout with no install step and no
+# build backend download. Worth it here: the test loop is the only feedback a delegated
+# change gets, so anything that can make it fail to start is a liability.
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+# Every method on the CoderBackend protocol is async, so effectively every test is too.
+# `auto` mode removes the need for an `@pytest.mark.asyncio` decorator on each one — a
+# decorator the local model reliably forgets, producing tests that silently pass without
+# ever awaiting anything.
+asyncio_mode = "auto"
+
+filterwarnings = ["error"]

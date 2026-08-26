@@ -52,15 +52,25 @@ export interface RunOllamaAgentOptions {
 }
 
 /**
- * Hard cap on model -> tool -> model round trips within a single agent run. Same value and
- * same reasoning as `MAX_TOOL_TURNS` in `ollama.provider.ts`: a local model that
- * misunderstands a tool result can otherwise loop on it forever (re-reading the same file,
- * retrying the same failing write), and every round trip is a full prompt re-evaluation on
- * the GPU — so an unbounded loop doesn't just hang the request, it pins the card. Eight is
- * enough for a realistic "look around, read two files, write one, verify" sequence while
- * still terminating quickly when the model is stuck.
+ * Hard cap on model -> tool -> model round trips within a single agent run. The cap itself
+ * is not optional: a local model that misunderstands a tool result will otherwise loop on it
+ * forever (re-reading the same file, retrying the same failing write), and every round trip
+ * is a full prompt re-evaluation on the GPU — so an unbounded loop doesn't just hang the
+ * request, it pins the card.
+ *
+ * Raised from 8 after measuring a real test-driven delegation: qwen2.5-coder:14b was asked
+ * to implement a module against an existing pytest file, and spent its whole budget on
+ * `write_file` -> `run_command pytest` -> read failure -> rewrite. That cycle costs *two*
+ * turns per attempt plus the initial reads, so 8 turns bought roughly three attempts and the
+ * run was cut off mid-convergence rather than because the model was stuck. Twenty gives
+ * about eight attempts, which is the difference between "the loop works but never finishes"
+ * and a usable delegation.
+ *
+ * Deliberately higher than `MAX_TOOL_TURNS` in `ollama.provider.ts`, which the web chat uses:
+ * there, a user is watching a stream and a long silent tool loop is bad UX, so stopping early
+ * is right. Here the caller is a CLI or an IDE that already expects to wait.
  */
-export const MAX_AGENT_TURNS = 8;
+export const MAX_AGENT_TURNS = 20;
 
 /**
  * Time Ollama is allowed to take before it starts answering. Matches
