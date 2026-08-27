@@ -1,6 +1,7 @@
-**/node_modules
-**/dist
-**/generated
-**/.angular
+/node_modules
+/dist
+/generated
 .git
 *.log
+*.tmp
+*.temp

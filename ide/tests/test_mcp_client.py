@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from local_coder.mcp_client import (
     _parse_agent_result,
+    _parse_read,
     _parse_listing,
     _parse_search,
     _parse_status,
@@ -228,3 +229,53 @@ class TestAgentUsage:
 
         assert "Tokens:" not in run.answer
         assert run.answer == "Done."
+
+
+class TestReadFile:
+    """The header `local_workspace_read` puts on its answer, and why it must come off.
+
+    Treating the whole answer as the file's content put a spurious first line in the editor
+    and — far worse — wrote that line *into the file* on save, so opening and saving any file
+    silently prepended its own path to it.
+    """
+
+    def test_strips_the_path_header(self) -> None:
+        content = _parse_read("src/app.py", "src/app.py:\ndef main():\n    return 1\n")
+
+        assert content.text == "def main():\n    return 1\n"
+        assert content.truncated is False
+
+    def test_detects_truncation_from_the_header(self) -> None:
+        # The old check looked for "[truncated", which this tool never emits — so an oversized
+        # file was editable and saving it would have discarded everything past the cut.
+        content = _parse_read(
+            "big.log", "big.log (truncated at 256000 bytes):\nfirst part only\n"
+        )
+
+        assert content.truncated is True
+        assert content.text == "first part only\n"
+
+    def test_an_empty_file_comes_back_empty(self) -> None:
+        content = _parse_read("empty.txt", "empty.txt:\n")
+
+        assert content.text == ""
+        assert content.bytes_read == 0
+
+    def test_a_first_line_ending_in_a_colon_is_kept(self) -> None:
+        # A real header both ends in a colon and starts with the path that was requested;
+        # requiring both is what stops this from eating a line of someone's YAML.
+        content = _parse_read("conf.yml", "conf.yml:\nserver:\n  port: 3000\n")
+
+        assert content.text == "server:\n  port: 3000\n"
+
+    def test_text_with_no_header_is_returned_as_is(self) -> None:
+        # A change in the tool's wording should degrade to a visible extra line, never to a
+        # silently truncated file.
+        content = _parse_read("a.txt", "no header here")
+
+        assert content.text == "no header here"
+
+    def test_content_bytes_measure_the_content_not_the_header(self) -> None:
+        content = _parse_read("a.txt", "a.txt:\nabc")
+
+        assert content.bytes_read == 3

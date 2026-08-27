@@ -12,8 +12,10 @@ from PySide6.QtGui import (
     QColor,
     QFont,
     QFontMetrics,
+    QIcon,
     QPainter,
     QPaintEvent,
+    QPixmap,
     QTextFormat,
 )
 from PySide6.QtWidgets import (
@@ -66,6 +68,56 @@ class FileBadge(QWidget):
         painter.setPen(QColor(_ink_for(self._kind.color)))
         painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, self._kind.badge)
         painter.end()
+
+
+def badge_icon(name: str, size: int = 16) -> QIcon:
+    """The type badge as a `QIcon`, for use as a tree item's own icon.
+
+    This exists instead of putting a `FileBadge` widget on the row with `setItemWidget`, and
+    the reason is not cosmetic. An item widget sits *on top of* the row and swallows the mouse
+    events that would otherwise reach the tree, so `itemClicked` never fires for any row that
+    has one — the file becomes unopenable, and only for the rows that got a badge, which makes
+    it look like the tree is randomly broken rather than like the badges are at fault.
+
+    An icon is part of the item, so hit-testing, selection and keyboard navigation all keep
+    working exactly as they do on a bare row.
+    """
+    kind = file_kind(name)
+    pixmap = QPixmap(size, size)
+    pixmap.fill(QColor(0, 0, 0, 0))
+
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QColor(kind.color))
+    painter.drawRoundedRect(QRect(0, 0, size, size), 4, 4)
+
+    font = QFont()
+    font.setPointSizeF(size * 0.42)
+    font.setBold(True)
+    painter.setFont(font)
+    painter.setPen(QColor(_ink_for(kind.color)))
+    painter.drawText(QRect(0, 0, size, size), Qt.AlignmentFlag.AlignCenter, kind.badge)
+    painter.end()
+
+    return QIcon(pixmap)
+
+
+def folder_icon(size: int = 16) -> QIcon:
+    """A muted square for directories, so file rows and folder rows align on the same grid.
+
+    Without it a folder's name starts where a file's badge does, and the tree reads as two
+    ragged columns rather than one.
+    """
+    pixmap = QPixmap(size, size)
+    pixmap.fill(QColor(0, 0, 0, 0))
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QColor(p.SURFACE_ACTIVE))
+    painter.drawRoundedRect(QRect(1, 3, size - 2, size - 6), 3, 3)
+    painter.end()
+    return QIcon(pixmap)
 
 
 def _ink_for(background: str) -> str:

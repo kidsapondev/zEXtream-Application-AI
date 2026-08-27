@@ -300,8 +300,7 @@ class McpBackend:
     async def read_file(self, path: str) -> FileContent:
         clean = _to_posix(path)
         text = await self._call_tool("local_workspace_read", {"path": clean})
-        truncated = "[truncated" in text
-        return FileContent(clean, text, len(text.encode("utf-8")), truncated)
+        return _parse_read(clean, text)
 
     async def write_file(self, path: str, text: str) -> None:
         await self._call_tool(
@@ -438,6 +437,32 @@ def _parse_agent_result(task: str, text: str) -> AgentRun:
         usage=usage,
         model=model,
     )
+
+
+def _parse_read(path: str, text: str) -> FileContent:
+    """Separates the file's real content from the header `local_workspace_read` puts on it.
+
+    That tool answers `"{path}:\\n{content}"`, or `"{path} (truncated at N bytes):\\n{content}"`
+    — a header meant for a person reading a tool result in an IDE.
+
+    Treating the whole answer as the content is not a cosmetic mistake, and it was one made
+    here: the header showed up as a spurious first line in the editor, and saving wrote it
+    **into the file**, so opening and saving any file silently prepended its own path to it.
+    The truncation flag was wrong too — it looked for `[truncated`, which this tool never
+    emits — so an oversized file was editable and saving it would have discarded the tail.
+
+    The header is only stripped when the first line genuinely is one: it must end in a colon
+    and begin with the path that was asked for. A file whose real first line happens to end
+    in a colon keeps it.
+    """
+    head, separator, body = text.partition("\n")
+    if separator and head.endswith(":") and head.startswith(path):
+        truncated = "(truncated at" in head
+        return FileContent(path, body, len(body.encode("utf-8")), truncated)
+
+    # No recognisable header — return what came back rather than guessing, so a change in the
+    # tool's wording degrades to a visible extra line instead of a silently truncated file.
+    return FileContent(path, text, len(text.encode("utf-8")), False)
 
 
 def _parse_exec(command: str, args: Sequence[str], text: str) -> ExecResult:

@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Awaitable, Callable
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QComboBox,
     QFrame,
@@ -52,7 +53,7 @@ from ..workspace import WorkspaceTree
 from . import palette as p
 from .highlighter import Highlighter
 from .palette import file_kind, known_languages, language_for
-from .widgets import CodeEditor, FileBadge, Pill
+from .widgets import CodeEditor, Pill, badge_icon, folder_icon
 
 #: The five model actions across the toolbar, each a preset instruction rather than a separate
 #: feature. Keeping them as data means adding one is a line here, not a new code path.
@@ -86,6 +87,29 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Local Coder")
         self.resize(1440, 900)
         self._build()
+        self._bind_shortcuts()
+
+    def _bind_shortcuts(self) -> None:
+        """Keyboard bindings.
+
+        Save is the one that matters. Without it the window can open a file and edit it and
+        offers no way at all to write it back — every change is lost on close, which makes
+        the whole editor decorative. It was missing until a walkthrough of the running window
+        went looking for it.
+        """
+        for sequence, handler in (
+            ("Ctrl+S", lambda: self._spawn(self.save_active(), "save")),
+            ("Ctrl+W", self._close_active_tab),
+            ("Ctrl+Q", self.close),
+            ("Ctrl+R", lambda: self._spawn(self._load_root(), "reload")),
+        ):
+            shortcut = QShortcut(QKeySequence(sequence), self)
+            shortcut.activated.connect(handler)
+
+    def _close_active_tab(self) -> None:
+        index = self._tabs.currentIndex()
+        if index >= 0:
+            self._on_tab_close(index)
 
     # -- construction --------------------------------------------------------------------
 
@@ -337,10 +361,13 @@ class MainWindow(QMainWindow):
             self._tree.addTopLevelItem(self._make_item(entry))
 
     def _make_item(self, entry: Entry) -> QTreeWidgetItem:
-        item = QTreeWidgetItem([entry.name if entry.is_dir else entry.name])
+        item = QTreeWidgetItem([entry.name])
         item.setData(0, PATH_ROLE, entry.path)
         item.setData(0, IS_DIR_ROLE, entry.is_dir)
         item.setData(0, LOADED_ROLE, False)
+        # An icon rather than a row widget. setItemWidget would swallow the clicks that open
+        # the file - see badge_icon - so the badge has to be part of the item itself.
+        item.setIcon(0, folder_icon() if entry.is_dir else badge_icon(entry.name))
         if entry.is_dir:
             # A placeholder child is what gives a collapsed directory its expand arrow without
             # listing it first — the listing is a round trip to a subprocess, so it waits until
@@ -360,19 +387,6 @@ class MainWindow(QMainWindow):
         item.takeChildren()
         for entry in entries:
             item.addChild(self._make_item(entry))
-        self._decorate(item)
-
-    def _decorate(self, parent: QTreeWidgetItem) -> None:
-        """Attaches a colour badge to every file row under `parent`.
-
-        Done after insertion rather than in `_make_item` because `setItemWidget` needs the item
-        to already be in the tree — setting it earlier silently does nothing, which looks like
-        the badges simply failing to render.
-        """
-        for index in range(parent.childCount()):
-            child = parent.child(index)
-            if not child.data(0, IS_DIR_ROLE):
-                self._tree.setItemWidget(child, 0, _row_widget(child.text(0)))
 
     def _on_item_clicked(self, item: QTreeWidgetItem, _column: int) -> None:
         if item.data(0, IS_DIR_ROLE):
@@ -468,6 +482,10 @@ class MainWindow(QMainWindow):
         if path is None:
             self._status_left.setText("Open a file first")
             return
+        # Echoed in the status bar as well as in the AI panel. The panel sits on the far side
+        # of the window from the button just pressed, and a click with no acknowledgement
+        # anywhere near it reads as a click that did not register.
+        self._status_left.setText(f"{key}: {path}")
         self._spawn(self._run_task(f"{instruction}\n\nFile: {path}"), key)
 
     def _on_task_submitted(self) -> None:
@@ -526,19 +544,6 @@ class MainWindow(QMainWindow):
     def _on_create_file(self) -> None:
         self._status_left.setText("Type a path in the task box and ask the model to create it")
         self._ai_task.setFocus()
-
-
-def _row_widget(name: str) -> QWidget:
-    """A file row: colour badge, then the name."""
-    holder = QWidget()
-    row = QHBoxLayout(holder)
-    row.setContentsMargins(2, 0, 0, 0)
-    row.setSpacing(8)
-    row.addWidget(FileBadge(name))
-    label = QLabel(name)
-    label.setStyleSheet(f"color: {p.TEXT_SECONDARY};")
-    row.addWidget(label, 1)
-    return holder
 
 
 def kind_of(name: str) -> str:
