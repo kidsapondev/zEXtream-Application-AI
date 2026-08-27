@@ -33,6 +33,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QComboBox,
+    QInputDialog,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -51,6 +52,7 @@ from PySide6.QtWidgets import (
 from ..protocols import AgentError, CoderBackend, Entry
 from ..workspace import WorkspaceTree
 from . import palette as p
+from .dock import Dock
 from .highlighter import Highlighter
 from .palette import file_kind, known_languages, language_for
 from .widgets import CodeEditor, Pill, badge_icon, folder_icon
@@ -110,6 +112,19 @@ class MainWindow(QMainWindow):
         index = self._tabs.currentIndex()
         if index >= 0:
             self._on_tab_close(index)
+
+    @staticmethod
+    def _goto(editor: CodeEditor, line: int) -> None:
+        """Puts the cursor on a 1-based line and scrolls it into view.
+
+        Search hits and diagnostics are both 1-based because people read them; Qt's blocks are
+        0-based. Converting in one place keeps the off-by-one out of every call site.
+        """
+        block = editor.document().findBlockByLineNumber(max(0, line - 1))
+        cursor = editor.textCursor()
+        cursor.setPosition(block.position())
+        editor.setTextCursor(cursor)
+        editor.centerCursor()
 
     # -- construction --------------------------------------------------------------------
 
@@ -197,7 +212,7 @@ class MainWindow(QMainWindow):
         search.setObjectName("ghost")
         search.setFixedWidth(40)
         search.setToolTip("Search the workspace")
-        search.clicked.connect(lambda: self._focus_dock("Search"))
+        search.clicked.connect(self._open_search)
         controls.addWidget(search)
         column.addLayout(controls)
 
@@ -275,22 +290,10 @@ class MainWindow(QMainWindow):
         return panel
 
     def _build_dock(self) -> QWidget:
-        self._dock = QTabWidget()
-        self._dock.setObjectName("dock")
-        self._dock.setFixedHeight(200)
-
-        for name in ("Problems", "Output", "Terminal", "Search"):
-            view = QPlainTextEdit()
-            view.setObjectName("dockOutput")
-            view.setReadOnly(True)
-            if name == "Problems":
-                view.setPlaceholderText(
-                    "No analyser is connected yet, so nothing here is being checked."
-                )
-            elif name == "Terminal":
-                view.setPlaceholderText("Command output appears here.")
-            self._dock.addTab(view, name)
-
+        self._dock = Dock(self._backend, self._spawn)
+        self._dock.hit_chosen.connect(
+            lambda path, line: self._spawn(self._open(path, line=line), "open")
+        )
         return self._dock
 
     def _build_status(self) -> QWidget:
@@ -350,6 +353,11 @@ class MainWindow(QMainWindow):
         )
         self._status_left.setText(f"{status.workspace_root}")
         self._status_right.setText(model)
+        # The terminal needs to know what it may run before someone types into it — an
+        # allowlist discovered by being refused is a worse allowlist.
+        self._dock.terminal.set_status(
+            exec_enabled=status.exec_enabled, allowed=status.allowed_commands
+        )
         await self._load_root()
 
     # -- explorer ------------------------------------------------------------------------
@@ -398,9 +406,11 @@ class MainWindow(QMainWindow):
 
     # -- editor --------------------------------------------------------------------------
 
-    async def _open(self, path: str) -> None:
+    async def _open(self, path: str, *, line: int | None = None) -> None:
         if path in self._editors:
             self._tabs.setCurrentWidget(self._editors[path])
+            if line is not None:
+                self._goto(self._editors[path], line)
             return
 
         content = await self._backend.read_file(path)
@@ -416,6 +426,8 @@ class MainWindow(QMainWindow):
         label = path.rsplit("/", 1)[-1] + (" (ro)" if content.truncated else "")
         index = self._tabs.addTab(editor, label)
         self._tabs.setCurrentIndex(index)
+        if line is not None:
+            self._goto(editor, line)
         self._sync_active()
 
     def _on_text_changed(self, path: str) -> None:
@@ -525,25 +537,51 @@ class MainWindow(QMainWindow):
 
     # -- dock ----------------------------------------------------------------------------
 
-    def _focus_dock(self, name: str) -> None:
-        for index in range(self._dock.count()):
-            if self._dock.tabText(index) == name:
-                self._dock.setCurrentIndex(index)
-                return
+    def _open_search(self) -> None:
+        self._dock.show_pane(self._dock.search)
+        self._dock.search.focus()
 
     def _log(self, text: str, *, tab: str = "Output") -> None:
-        for index in range(self._dock.count()):
-            if self._dock.tabText(index) == tab:
-                view = self._dock.widget(index)
-                if isinstance(view, QPlainTextEdit):
-                    view.appendPlainText(text)
-                return
+        pane = self._dock.problems if tab == "Problems" else self._dock.output
+        pane.append(text)
 
     # -- explorer actions -----------------------------------------------------------------
 
     def _on_create_file(self) -> None:
-        self._status_left.setText("Type a path in the task box and ask the model to create it")
-        self._ai_task.setFocus()
+        """Creates an empty file and opens it.
+
+        A path, not a name: the dialog sits above a tree the user has been navigating, and a
+        bare name would have to guess a directory. Typing `src/thing.py` says exactly where it
+        goes, and the host creates the parent directories.
+        """
+        path, accepted = QInputDialog.getText(
+            self,
+            "Create new file",
+            "Path, relative to the workspace root:",
+            text="",
+        )
+        if not accepted or not path.strip():
+            return
+        self._spawn(self._create(path.strip()), "create")
+
+    async def _create(self, path: str) -> None:
+        clean = path.replace("\\", "/").strip("/")
+        # Refused before writing rather than after: an empty write to an existing path would
+        # silently erase it, and "create" is not a word anyone expects to mean that.
+        try:
+            await self._backend.read_file(clean)
+        except AgentError:
+            pass
+        else:
+            self._status_left.setText(f"{clean} already exists — opening it instead")
+            await self._open(clean)
+            return
+
+        await self._backend.write_file(clean, "")
+        self._log(f"created {clean}")
+        await self._load_root()
+        await self._open(clean)
+        self._status_left.setText(f"created {clean}")
 
 
 def kind_of(name: str) -> str:
