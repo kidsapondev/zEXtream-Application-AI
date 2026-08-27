@@ -1,10 +1,10 @@
 @echo off
 setlocal
-title Local Coder
+title Local Coder (terminal)
 
-rem Double-click launcher for the desktop window.
-rem The terminal version is local-coder-tui.bat; both run the same engine and differ only in
-rem how they draw.
+rem Double-click launcher for the TERMINAL version of the IDE.
+rem The windowed version is local-coder.bat; this one is for SSH sessions and machines with
+rem no desktop, and runs the same engine.
 rem
 rem The checks below are not ceremony. Every one of them is a failure that otherwise shows up
 rem as a Python traceback in a console window that closes before it can be read, or - worse -
@@ -45,11 +45,11 @@ if not exist "..\host-bridge\.env" (
 
 rem `python -m local_coder` needs the package importable. It is installed editable, so this
 rem only fails on a fresh checkout - in which case say so rather than dumping a ModuleNotFound.
-python -c "import local_coder, PySide6, qasync" >nul 2>&1
+python -c "import local_coder" >nul 2>&1
 if errorlevel 1 (
     echo.
-    echo   The desktop window needs local_coder, PySide6 and qasync.
-    echo   Install them with:  python -m pip install --user -e . PySide6 qasync
+    echo   The local_coder package is not installed for this Python.
+    echo   Install it with:  python -m pip install --user -e .
     echo   ^(run that from the ide folder^)
     echo.
     pause
@@ -68,7 +68,7 @@ if errorlevel 1 (
     timeout /t 3 >nul
 )
 
-python -m local_coder.gui
+python -m local_coder
 
 rem A non-zero exit means a traceback the user needs to see; hold the window open for it.
 if errorlevel 1 (

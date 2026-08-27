@@ -60,3 +60,37 @@ class TestFileKind:
 
     def test_language_for_is_the_kind_s_language(self) -> None:
         assert language_for("src/app.py") == "python"
+
+
+class TestKnownLanguages:
+    """The picker's contents, derived rather than hand-listed.
+
+    A non-editable combo box silently ignores `setCurrentText` with a value it does not
+    contain, so a language missing from the picker shows the *previous* file's language with
+    no error anywhere. Opening a Markdown file showed "python" for exactly this reason.
+    """
+
+    def test_every_file_type_s_language_is_offered(self) -> None:
+        from local_coder.gui.palette import known_languages
+
+        offered = set(known_languages())
+        for name in (
+            "a.py", "a.ts", "a.js", "a.json", "a.html", "a.css",
+            "a.php", "a.md", "a.yml", "a.toml", "a.sql", "a.sh", "a.scss",
+        ):
+            assert language_for(name) in offered, name
+
+    def test_the_fallback_language_is_offered_last(self) -> None:
+        from local_coder.gui.palette import known_languages
+
+        languages = known_languages()
+
+        assert languages[-1] == "text"
+        assert languages.count("text") == 1
+
+    def test_the_list_is_sorted_apart_from_the_fallback(self) -> None:
+        from local_coder.gui.palette import known_languages
+
+        head = known_languages()[:-1]
+
+        assert list(head) == sorted(head)

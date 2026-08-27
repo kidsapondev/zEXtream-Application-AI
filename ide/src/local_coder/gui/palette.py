@@ -110,3 +110,18 @@ def file_kind(name: str) -> FileKind:
 
 def language_for(name: str) -> str:
     return file_kind(name).language
+
+
+def known_languages() -> tuple[str, ...]:
+    """Every language any file type here maps to, sorted, with `text` last.
+
+    Derived from `_KINDS` rather than written out separately. A hand-maintained list drifts
+    the moment a file type is added, and the way it drifts is invisible: the language picker
+    is a non-editable combo box, so `setCurrentText` with a value it does not contain silently
+    does nothing and the box keeps showing the previous file's language. That is exactly the
+    bug this function exists to prevent — opening a Markdown file showed "python" because
+    `markdown` had never been added to the picker.
+    """
+    languages = {kind.language for kind in _KINDS.values()}
+    languages.discard(_DEFAULT.language)
+    return (*sorted(languages), _DEFAULT.language)
